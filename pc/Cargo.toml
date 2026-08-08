@@ -1,0 +1,31 @@
+[package]
+name = "phonebridge"
+version = "1.3.0"
+edition = "2021"
+authors = ["PhoneBridge Team"]
+description = "Turn your PC into a wireless headset for your phone"
+license = "MIT"
+
+[dependencies]
+tokio = { version = "1.35", features = ["full"] }
+cpal = "0.15"
+opus = "0.3"
+tungstenite = "0.21"
+tokio-tungstenite = "0.21"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+byteorder = "1.5"
+crossbeam-channel = "0.5"
+parking_lot = "0.12"
+log = "0.4"
+env_logger = "0.11"
+btleplug = "0.11"
+uuid = "1.6"
+
+# Windows-specific dependencies
+[target.'cfg(windows)'.dependencies]
+tray-icon = "0.11"
+
+[profile.release]
+opt-level = 3
+lto = true
