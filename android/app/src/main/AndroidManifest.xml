@@ -1,65 +1,48 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.phonebridge.app">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Network -->
+    <!-- Discovery/pairing/протокол поверх Wi-Fi -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
 
-    <!-- Audio / MediaProjection -->
-    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Control-plane для звонков: узнать о входящем звонке и номере,
+         ответить/сбросить через InCallService. Звук звонка сюда НЕ входит —
+         он идёт нативным Bluetooth HFP, для чего никаких доп. permission
+         от приложения не требуется (это делает сама ОС). -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
+
+    <!-- Медиа-аудио (не звонки): захват системного плейбэка через MediaProjection. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
-
-    <!-- Bluetooth / BLE -->
-    <uses-permission android:name="android.permission.BLUETOOTH" />
-    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
-    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
-    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
-
-    <!-- Notifications -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Telecom (call control) -->
-    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
-
     <application
-        android:allowBackup="true"
-        android:icon="@mipmap/ic_launcher"
-        android:label="@string/app_name"
-        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="PhoneBridge2"
+        android:allowBackup="false"
         android:supportsRtl="true"
-        android:theme="@style/Theme.PhoneBridge">
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
 
         <activity
             android:name=".MainActivity"
-            android:exported="true"
-            android:theme="@style/Theme.PhoneBridge">
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
+        <!-- InCallService: даёт приложению доступ к управлению активным звонком
+             (answer/reject) — регистрируется как "phone account" / доп. UI,
+             НЕ становится дефолтным дозвонщиком (это не нужно для нашей архитектуры). -->
         <service
-            android:name=".service.AudioCaptureService"
-            android:foregroundServiceType="mediaProjection"
-            android:exported="false" />
-
-        <service
-            android:name=".service.AudioPlaybackService"
-            android:foregroundServiceType="microphone"
-            android:exported="false" />
-
-        <service
-            android:name=".call.CallService"
+            android:name=".call.BridgeInCallService"
             android:permission="android.permission.BIND_INCALL_SERVICE"
             android:exported="true">
             <meta-data
                 android:name="android.telecom.IN_CALL_SERVICE_UI"
-                android:value="true" />
+                android:value="false" />
             <intent-filter>
                 <action android:name="android.telecom.InCallService" />
             </intent-filter>

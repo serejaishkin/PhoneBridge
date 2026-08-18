@@ -1,0 +1,6 @@
+/pc/target/
+/android/.gradle/
+/android/app/build/
+/android/local.properties
+*.iml
+.idea/

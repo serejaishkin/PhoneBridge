@@ -1,78 +1,65 @@
-# PhoneBridge V1.3
+# PhoneBridge2 (скелет v2)
 
-Turn your PC into a wireless headset for your phone. Answer calls, stream audio, and control everything from your computer.
+Переосмысленный старт проекта после ревью `serejaishkin/PhoneBridge` — тот же
+смысл (PC как беспроводная гарнитура/пульт для Android-звонков и медиа-звука,
+без облака), но с исправленной архитектурой:
 
-## Features
+- **Звонки идут нативным Bluetooth Classic HFP** (телефон = Audio Gateway,
+  PC = Hands-Free unit) — приложение НЕ пытается перехватывать аудио звонка
+  само, это системно недостижимо без root/Linux+BlueZ. Приложение отвечает
+  только за control-plane (показать входящий звонок, Answer/Decline).
+- **Есть настоящий TLS-пейринг** (trust-on-first-use по fingerprint
+  сертификата, вдохновлено KDE Connect, но реализовано самостоятельно —
+  KDE Connect не форкали, см. обсуждение лицензии GPL vs наш MIT).
+- **Discovery по UDP broadcast**, не BLE — раз всё равно нужен общий Wi-Fi
+  для медиа-потока, BLE не даёт ничего, кроме лишних Android 12+ разрешений.
 
-| Feature | Android | iPhone | Description |
-|---------|---------|--------|-------------|
-| Media audio | ✅ Bluetooth A2DP | ✅ Bluetooth A2DP | Stream phone audio to PC headphones |
-| Call audio | ✅ Wi-Fi + Opus/UDP | ❌ Not possible* | Answer calls from your PC |
-| PC microphone | ✅ Wi-Fi + Opus/UDP | ❌ | Talk back through PC mic |
-| Call notifications | ✅ | ⚠️ Limited | See who's calling on your PC screen |
-| Auto-discovery | ✅ BLE | ✅ Bluetooth | Phone finds PC automatically |
-| iOS AirPlay fallback | ✅ (Linux/macOS) | ✅ (Windows via ShairportQt) | Stream iOS media via AirPlay |
+## Статус: скелет, не MVP
 
-\* iOS restrictions prevent call interception by third-party apps.
+Собирается и проверено в этой сессии:
+- `pc/` — компилируется (`cargo check` зелёный: identity/pairing/discovery/protocol/
+  call-state/ui-trait). **Не тестировался end-to-end** (два реальных устройства
+  друг с другом не соединялись).
+- `android/` — код написан по тем же контрактам (протокол, short_code, TelephonyCallback,
+  InCallService), но **не собирался** — в этом окружении нет Android SDK/Gradle
+  с доступом к google()/mavenCentral(). Синтаксис вычитан вручную, но это не
+  замена реальной сборке.
 
-## Architecture
+## Структура
 
 ```
-PhoneBridge Protocol V1.3
-├── Discovery: BLE advertising (Android IP + port in manufacturer data)
-├── Media: Bluetooth A2DP Sink (native OS)
-├── Call Audio: UDP + Opus (48kHz, 20ms frames, bidirectional)
-├── Signaling: WebSocket (JSON)
-└── Control: AT-like commands over WebSocket
+pc/                      Rust, ПК-часть
+  src/pairing/            identity.rs (сертификат), trust.rs (доверие), server.rs (TLS listener)
+  src/discovery/           UDP broadcast
+  src/call/                состояние звонка + заглушка check_hfp_support()
+  src/ui/                  UiBackend trait + HeadlessUi (лог вместо трея — платформенные
+                            реализации трея/окон — следующий шаг, см. NEXT_STEPS.md)
+  src/protocol.rs          JSON-протокол сообщений
+
+android/app/.../com/phonebridge2/app/
+  pairing/                 Identity.kt, TrustStore.kt, Protocol.kt (зеркало pc/src/protocol.rs)
+  discovery/               DiscoveryClient.kt
+  call/                    CallManager.kt (TelephonyCallback), BridgeInCallService.kt (answer/decline — РАБОЧИЕ, не заглушки)
+  ui/onboarding/           OnboardingStep.kt (модель шагов из AI_HANDOFF_GUI.md)
+  MainActivity.kt          минимальный экран, связывающий всё вместе
+
+AI_HANDOFF_GUI.md          постановка задачи на GUI-архитектуру (из предыдущего ревью)
+NEXT_STEPS.md              что делать дальше и в каком порядке
 ```
 
-## Quick Start
+## Сборка PC-части
 
-### PC Setup (Windows/Linux/macOS)
-
-```bash
+```
 cd pc
-cargo build --release
-./target/release/phonebridge
+cargo check   # или cargo run
 ```
 
-### Android Setup
+Зависимости специально запинены точными версиями в `Cargo.toml`
+(`rustls`, `tokio-rustls`, `zeroize`, `time`) — новые версии этих крейтов
+требуют `edition2024`, который не поддерживает cargo 1.75. Если у вас cargo
+новее — можно ослабить пины, но тогда стоит перепроверить сборку.
 
-1. Install **PhoneBridge** app from releases
-2. Pair phone to PC via Bluetooth (for media)
-3. Connect to `PhoneBridge` Wi-Fi hotspot
-4. Grant permissions: microphone, phone calls, Bluetooth, screen capture
-5. Tap **Start Bridge** — BLE advertising starts automatically
+## Сборка Android-части
 
-### iOS AirPlay (optional)
-
-- **Linux/macOS**: install `shairport-sync`
-- **Windows**: install [ShairportQt](https://github.com/Frank-Friemel/ShairportQt)
-- iPhone → Control Center → AirPlay → "PhoneBridge"
-
-## Network Ports
-
-| Port | Direction | Purpose |
-|------|-----------|---------|
-| 5000 | PC ↔ Android | WebSocket signaling |
-| 5001 | Android → PC | Opus audio (system audio) |
-| 5002 | iPhone → PC | AirPlay audio (optional) |
-| 5003 | PC → Android | Opus audio (PC microphone) |
-
-## Building from Source
-
-### Android
-```bash
-cd android
-./gradlew assembleDebug
-```
-
-### PC (Rust)
-```bash
-cd pc
-cargo build --release
-```
-
-## License
-
-MIT License — free for personal and commercial use.
+Не проверялась в этой сессии. Нужен Android Studio / Gradle с доступом к
+`google()` и `mavenCentral()`. minSdk = 31 (нужен `TelephonyCallback`).
