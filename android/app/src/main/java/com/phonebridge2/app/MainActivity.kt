@@ -12,59 +12,76 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import com.phonebridge2.app.call.CallManager
 import com.phonebridge2.app.call.CallState
+import com.phonebridge2.app.connection.ConnectionManager
 import com.phonebridge2.app.discovery.Announce
 import com.phonebridge2.app.discovery.DiscoveryClient
 import com.phonebridge2.app.pairing.Identity
-import com.phonebridge2.app.pairing.TrustStore
+import com.phonebridge2.app.pairing.PairingManager
+import com.phonebridge2.app.pairing.TlsClient
 import com.phonebridge2.app.ui.onboarding.OnboardingStep
 
-/**
- * Минимальный, но НЕ фиктивный экран: в отличие от PhoneBridge v1
- * (один экран с двумя кнопками "Start"/"Stop"), здесь уже видна структура
- * онбординга и реальное состояние компонентов. Полноценные экраны под каждый
- * OnboardingStep — задача для Kimi (см. AI_HANDOFF_GUI.md).
- */
 class MainActivity : ComponentActivity() {
-
     private lateinit var identity: Identity
-    private lateinit var trustStore: TrustStore
     private lateinit var callManager: CallManager
+    private lateinit var connectionManager: ConnectionManager
+    private lateinit var pairingManager: PairingManager
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { /* TODO(Kimi): по каждому разрешению — свой экран-объяснение, не общий батч */ }
+    ) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         identity = Identity.loadOrCreate(applicationContext)
-        trustStore = TrustStore(applicationContext)
         callManager = CallManager(applicationContext).also { it.start() }
+        connectionManager = ConnectionManager(TlsClient(), lifecycleScope)
+        pairingManager = PairingManager(applicationContext, identity, connectionManager)
+        connectionManager.setMessageHandler { message -> pairingManager.onMessage(message) }
 
         val foundPeers = mutableStateListOf<Pair<Announce, String>>()
         DiscoveryClient.listen(lifecycleScope) { announce, addr ->
-            if (foundPeers.none { it.first.device_id == announce.device_id }) {
-                foundPeers.add(announce to addr)
+            runOnUiThread {
+                val index = foundPeers.indexOfFirst { it.first.device_id == announce.device_id }
+                if (index >= 0) {
+                    foundPeers[index] = announce to addr
+                } else {
+                    foundPeers.add(announce to addr)
+                }
             }
         }
 
         setContent {
+            val connectionState by connectionManager.state.collectAsState()
+            val pairingState by pairingManager.state.collectAsState()
+
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     MainScreen(
                         deviceId = identity.deviceId,
                         fingerprint = identity.fingerprintHex(),
                         callState = callManager.state.collectAsState().value,
+                        connectionState = connectionState.toString(),
+                        pairingState = pairingState,
                         foundPeers = foundPeers,
+                        onConnect = { peer ->
+                            connectionManager.connect(
+                                host = peer.second,
+                                port = peer.first.pairing_port,
+                                fingerprint = peer.first.fingerprint,
+                                hello = pairingManager.hello(identity.deviceId),
+                            )
+                        },
+                        onConfirmPairing = { pairingManager.confirmPairing() },
                         onRequestPermissions = {
                             permissionLauncher.launch(
                                 arrayOf(
                                     android.Manifest.permission.READ_PHONE_STATE,
                                     android.Manifest.permission.ANSWER_PHONE_CALLS,
-                                    android.Manifest.permission.POST_NOTIFICATIONS
+                                    android.Manifest.permission.POST_NOTIFICATIONS,
                                 )
                             )
-                        }
+                        },
                     )
                 }
             }
@@ -72,6 +89,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        connectionManager.disconnect()
         callManager.stop()
         super.onDestroy()
     }
@@ -82,41 +100,68 @@ private fun MainScreen(
     deviceId: String,
     fingerprint: String,
     callState: CallState,
+    connectionState: String,
+    pairingState: PairingManager.State,
     foundPeers: List<Pair<Announce, String>>,
-    onRequestPermissions: () -> Unit
+    onConnect: (Pair<Announce, String>) -> Unit,
+    onConfirmPairing: () -> Unit,
+    onRequestPermissions: () -> Unit,
 ) {
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("PhoneBridge2 (skeleton)", style = MaterialTheme.typography.headlineSmall)
+        Text("PhoneBridge2", style = MaterialTheme.typography.headlineSmall)
         Text("device_id: $deviceId")
         Text("fingerprint: ${fingerprint.take(16)}…")
+        Text("Соединение: $connectionState")
 
         Button(onClick = onRequestPermissions) {
             Text("Запросить разрешения")
         }
 
         Divider()
-
         Text("Найденные ПК:", style = MaterialTheme.typography.titleMedium)
         if (foundPeers.isEmpty()) {
-            Text("Пока никого — убедитесь, что телефон в той же Wi-Fi сети, что и ПК.")
+            Text("Пока никого — убедитесь, что телефон и ПК в одной Wi-Fi сети.")
         } else {
-            foundPeers.forEach { (announce, addr) ->
-                Text("• ${announce.device_name} (${announce.platform}) — $addr:${announce.pairing_port}")
+            foundPeers.forEach { peer ->
+                val (announce, addr) = peer
+                Text("${announce.device_name} (${announce.platform})")
+                Text("$addr:${announce.pairing_port}", style = MaterialTheme.typography.bodySmall)
+                Text("PC fingerprint: ${announce.fingerprint.take(16)}…", style = MaterialTheme.typography.bodySmall)
+                Button(onClick = { onConnect(peer) }) {
+                    Text("Подключить")
+                }
             }
         }
 
-        Divider()
+        when (val state = pairingState) {
+            is PairingManager.State.WaitingForConfirmation -> {
+                Divider()
+                Text("Подтвердите сопряжение", style = MaterialTheme.typography.titleMedium)
+                Text("Код: ${state.shortCode}")
+                Text("Сверьте этот код на ПК и телефоне. Только после совпадения нажмите подтверждение.")
+                Button(onClick = onConfirmPairing) {
+                    Text("Подтвердить сопряжение")
+                }
+            }
+            is PairingManager.State.Paired -> {
+                Divider()
+                Text("ПК сопряжён: ${state.pcDeviceId}")
+            }
+            is PairingManager.State.Failed -> {
+                Divider()
+                Text("Ошибка сопряжения: ${state.message}")
+            }
+            PairingManager.State.Idle -> Unit
+        }
 
+        Divider()
         Text("Статус звонка: ${callStateLabel(callState)}")
 
         Divider()
-
-        Text("Шаги онбординга (модель, экраны — TODO):", style = MaterialTheme.typography.titleMedium)
+        Text("Шаги онбординга:", style = MaterialTheme.typography.titleMedium)
         OnboardingStep.ORDER.forEach { step ->
             Text("• ${step.title}: ${step.explanation}", style = MaterialTheme.typography.bodySmall)
         }
