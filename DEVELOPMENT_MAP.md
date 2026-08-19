@@ -19,6 +19,8 @@ Draft PR #1: `feat: implement TLS pairing protocol v1`
 ```text
 Android
   ├── Discovery
+  │    ├── DiscoveredPeer
+  │    └── PeerRegistry
   ├── TLS client
   ├── Pairing / TrustStore
   ├── ConnectionManager
@@ -34,10 +36,12 @@ PC Rust Core
   ├── TrustStore
   ├── ConnectionManager
   ├── PairingSession
+  ├── Call state
   └── Platform abstraction
-        ├── Windows
-        ├── macOS
-        └── Linux
+        └── HfpBackend
+             ├── Windows
+             ├── macOS
+             └── Linux
 ```
 
 ## Protocol v1
@@ -78,13 +82,13 @@ Pairing must verify both persistent identity fingerprints. TLS certificate pinni
 - Platform-neutral PC `connection` module.
 - Platform-neutral PC `PairingSession` state machine.
 - PC connection timeout helper.
-- Android bounded reconnect policy module.
-- Android `ConnectionManager` retries with bounded exponential backoff.
-- Android `DiscoveredPeer` model with discovery TTL.
-- Android UDP discovery client now maintains discovered peers and expires stale records.
-- PC `PlatformBackend` abstraction.
-- Windows, macOS and Linux backend skeletons.
-- PC daemon now selects the platform backend at runtime/compile target and reports HFP capability.
+- Android bounded reconnect policy.
+- Android `ConnectionManager` reconnect loop.
+- Android `DiscoveredPeer` model with TTL.
+- Android `PeerRegistry` for multiple discovered PCs.
+- Cross-platform `HfpBackend` abstraction.
+- Windows/Linux/macOS HFP backend slots isolated behind cfg modules.
+- PC call state remains independent from native audio transport.
 
 ## Important unfinished work
 
@@ -102,12 +106,24 @@ Pairing must verify both persistent identity fingerprints. TLS certificate pinni
 
 ### P1 — discovery
 
-- [x] Android UDP discovery client.
-- [ ] Parse and validate PC announcement.
+- [ ] Wire `DiscoveryClient` into `PeerRegistry` lifecycle.
+- [ ] Periodic prune of expired peers.
+- [ ] Validate discovery fields before inserting peers.
 - [ ] Prefer discovered PC fingerprint for TLS pinning.
-- [ ] Handle multiple PCs.
-- [x] Expire stale discoveries.
-- [x] Keep discovery independent from the transport connection.
+- [ ] Handle multiple PCs and selected peer persistence.
+- [ ] Keep discovery independent from transport connection.
+
+### P1 — calls / HFP
+
+- [ ] Define call control messages in the shared protocol.
+- [ ] Android call-state producer.
+- [ ] Answer/decline/end commands.
+- [ ] Wire PC call commands to `HfpBackend`.
+- [ ] Windows HFP detection/control implementation.
+- [ ] Linux BlueZ D-Bus HFP implementation.
+- [ ] macOS IOBluetooth HFP implementation.
+- [ ] Audio routing diagnostics.
+- [ ] Restore audio state after call.
 
 ### P1 — platform abstraction
 
@@ -119,22 +135,6 @@ PlatformBackend
   ├── MacOSBackend
   └── LinuxBackend
 ```
-
-Implemented as skeletons. Next work is native integration:
-
-- Windows: WinRT/Bluetooth APIs.
-- Linux: BlueZ/D-Bus.
-- macOS: IOBluetooth/Core platform APIs.
-
-### P1 — calls / HFP
-
-- [x] Cross-platform backend interface.
-- [ ] Bluetooth capability detection.
-- [ ] Phone call state protocol handling.
-- [ ] Answer/decline/end commands.
-- [ ] HFP connection backend per OS.
-- [ ] Audio routing.
-- [ ] Restore audio state after call.
 
 ### P1 — media
 
@@ -184,13 +184,13 @@ Implemented as skeletons. Next work is native integration:
 
 1. Read this file.
 2. Read `NEXT_STEPS.md`.
-3. Inspect the latest commits on `feature/tls-pairing-v1`.
+3. Inspect latest commits on `feature/tls-pairing-v1`.
 4. Continue from the first unchecked P0 item.
-5. Keep Windows/macOS/Linux changes behind `PlatformBackend`.
-6. After each major module, update this map.
+5. Do not start GUI/media/HFP native implementation until the P0 connection foundation is coherent.
+6. Update this map after every major module.
 
 ## Current next coding target
 
-**P0: integrate PairingSession into ConnectionManager and define canonical framing. Then connect discovered Android peers to the TLS client using the advertised fingerprint.**
+**P0 connection integration and canonical framing. After that, call-control protocol is the next feature.**
 
-Development is intentionally proceeding without running builds/tests at this stage. Validation is a separate stabilization pass requested by the user.
+Development is intentionally proceeding without running builds/tests at this stage. Build failures are to be fixed during the dedicated stabilization pass.
