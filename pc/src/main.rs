@@ -1,4 +1,5 @@
 mod call;
+mod connection;
 mod discovery;
 mod pairing;
 mod protocol;
@@ -28,12 +29,13 @@ async fn main() -> anyhow::Result<()> {
     let shared_state = call::SharedState::new();
     let ui: Arc<dyn UiBackend> = Arc::new(HeadlessUi);
 
-    // Проверка HFP-адаптера — сейчас всегда Unknown (см. call::check_hfp_support),
-    // но статус уже прокидывается в UI, чтобы дальше просто подключить реальную детекцию.
     let hfp_status = call::check_hfp_support().await;
     *shared_state.hfp_support.lock().await = hfp_status;
     ui.update_hfp_status(hfp_status).await;
 
+    // The pairing server owns the TLS acceptor/control-plane for now.
+    // PairingSession is kept transport-independent so the next refactor can
+    // move this state machine into ConnectionManager without changing protocol.
     let pairing_server = PairingServer::new(identity.clone(), trust_store.clone())?;
     let pairing_task = tokio::spawn(pairing_server.run());
 
