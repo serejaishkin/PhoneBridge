@@ -11,15 +11,19 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class ConnectionManager(
     private val tlsClient: TlsClient,
     private val scope: CoroutineScope,
+    private val onMessage: suspend (Message) -> Unit = {},
 ) {
     private val _state = MutableStateFlow(ConnectionState.DISCONNECTED)
     val state: StateFlow<ConnectionState> = _state.asStateFlow()
     private var job: Job? = null
     private var connection: TlsClient.Connection? = null
+    private val writeMutex = Mutex()
 
     fun connect(host: String, port: Int, fingerprint: String, hello: Message.Hello) {
         job?.cancel()
@@ -32,15 +36,18 @@ class ConnectionManager(
 
                 while (isActive) {
                     val message = tlsClient.readMessage(c)
-                    when (message) {
-                        Message.Ping -> tlsClient.sendMessage(c, Message.Pong)
-                        else -> Unit
+                    if (message is Message.Ping) {
+                        send(Message.Pong)
+                    } else {
+                        onMessage(message)
                     }
                 }
             } catch (_: Throwable) {
-                _state.value = ConnectionState.RECONNECTING
-                delay(1000)
-                _state.value = ConnectionState.DISCONNECTED
+                if (isActive) {
+                    _state.value = ConnectionState.RECONNECTING
+                    delay(1000)
+                    _state.value = ConnectionState.DISCONNECTED
+                }
             } finally {
                 connection?.close()
                 connection = null
@@ -49,9 +56,11 @@ class ConnectionManager(
     }
 
     fun send(message: Message) {
-        val c = connection ?: return
         scope.launch(Dispatchers.IO) {
-            runCatching { tlsClient.sendMessage(c, message) }
+            writeMutex.withLock {
+                val c = connection ?: return@withLock
+                runCatching { tlsClient.sendMessage(c, message) }
+            }
         }
     }
 
