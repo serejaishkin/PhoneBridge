@@ -17,6 +17,7 @@ import kotlinx.coroutines.sync.withLock
 class ConnectionManager(
     private val tlsClient: TlsClient,
     private val scope: CoroutineScope,
+    private val reconnectPolicy: ReconnectPolicy = ReconnectPolicy(),
 ) {
     private val _state = MutableStateFlow(ConnectionState.DISCONNECTED)
     val state: StateFlow<ConnectionState> = _state.asStateFlow()
@@ -31,31 +32,37 @@ class ConnectionManager(
 
     fun connect(host: String, port: Int, fingerprint: String, hello: Message.Hello) {
         job?.cancel()
+        reconnectPolicy.reset()
         job = scope.launch(Dispatchers.IO) {
-            _state.value = ConnectionState.CONNECTING
-            try {
-                val c = tlsClient.connect(host, port, fingerprint, hello)
-                connection = c
-                _state.value = ConnectionState.CONNECTED
+            var firstAttempt = true
+            while (isActive) {
+                _state.value = if (firstAttempt) ConnectionState.CONNECTING else ConnectionState.RECONNECTING
+                firstAttempt = false
+                try {
+                    val c = tlsClient.connect(host, port, fingerprint, hello)
+                    connection = c
+                    _state.value = ConnectionState.CONNECTED
+                    reconnectPolicy.reset()
 
-                while (isActive) {
-                    val message = tlsClient.readMessage(c)
-                    if (message is Message.Ping) {
-                        send(Message.Pong)
-                    } else {
-                        onMessage(message)
+                    while (isActive) {
+                        val message = tlsClient.readMessage(c)
+                        if (message is Message.Ping) {
+                            send(Message.Pong)
+                        } else {
+                            onMessage(message)
+                        }
                     }
+                } catch (_: Throwable) {
+                    if (!isActive) break
+                } finally {
+                    connection?.close()
+                    connection = null
                 }
-            } catch (_: Throwable) {
-                if (isActive) {
-                    _state.value = ConnectionState.RECONNECTING
-                    delay(1000)
-                    _state.value = ConnectionState.DISCONNECTED
-                }
-            } finally {
-                connection?.close()
-                connection = null
+
+                if (!isActive) break
+                delay(reconnectPolicy.nextDelay())
             }
+            _state.value = ConnectionState.DISCONNECTED
         }
     }
 
@@ -72,6 +79,7 @@ class ConnectionManager(
         job?.cancel()
         connection?.close()
         connection = null
+        reconnectPolicy.reset()
         _state.value = ConnectionState.DISCONNECTED
     }
 }
