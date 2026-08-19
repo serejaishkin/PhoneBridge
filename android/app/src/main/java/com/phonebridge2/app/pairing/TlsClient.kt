@@ -14,19 +14,14 @@ import javax.net.ssl.SSLSocket
 import javax.net.ssl.TrustManager
 import javax.net.ssl.X509TrustManager
 
-/** Minimal TLS client for the PhoneBridge control channel.
- *
- * MVP uses certificate pinning by SHA-256 fingerprint. The first connection
- * must supply the expected PC fingerprint; no system CA is trusted.
- */
+/** TLS client for the PhoneBridge control channel. */
 class TlsClient(
     private val connectTimeoutMs: Int = 5000,
     private val readTimeoutMs: Int = 15000,
 ) {
     data class Connection(
         val socket: SSLSocket,
-        val reader: BufferedReader,
-        val writer: BufferedWriter,
+        val channel: FramedChannel,
     ) {
         fun close() = socket.close()
     }
@@ -43,26 +38,16 @@ class TlsClient(
 
         val reader = BufferedReader(InputStreamReader(sslSocket.inputStream, Charsets.UTF_8))
         val writer = BufferedWriter(OutputStreamWriter(sslSocket.outputStream, Charsets.UTF_8))
-        val connection = Connection(sslSocket, reader, writer)
-
-        send(writer, hello)
+        val connection = Connection(sslSocket, FramedChannel(reader, writer))
+        connection.channel.write(hello)
         connection
     }
 
-    suspend fun readMessage(connection: Connection): Message = withContext(Dispatchers.IO) {
-        val line = connection.reader.readLine() ?: error("PhoneBridge connection closed")
-        ProtocolJson.decode(line)
-    }
+    suspend fun readMessage(connection: Connection): Message =
+        connection.channel.readAsync()
 
-    suspend fun sendMessage(connection: Connection, message: Message) = withContext(Dispatchers.IO) {
-        send(connection.writer, message)
-    }
-
-    private fun send(writer: BufferedWriter, message: Message) {
-        writer.write(ProtocolJson.encode(message))
-        writer.newLine()
-        writer.flush()
-    }
+    suspend fun sendMessage(connection: Connection, message: Message) =
+        connection.channel.writeAsync(message)
 
     private fun createPinnedSocket(host: String, port: Int, expectedFingerprint: String): SSLSocket {
         val trustManager = object : X509TrustManager {
