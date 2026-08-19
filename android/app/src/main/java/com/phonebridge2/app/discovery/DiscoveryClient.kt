@@ -15,24 +15,20 @@ data class Announce(
     val device_id: String,
     val device_name: String,
     val platform: String,
-    val pairing_port: Int
+    val pairing_port: Int,
+    val fingerprint: String,
 )
 
 object DiscoveryClient {
     const val DISCOVERY_PORT = 17592
     private val json = Json { ignoreUnknownKeys = true }
 
-    /**
-     * Слушает broadcast-объявления от PC в локальной сети. Вызывающая сторона
-     * должна убедиться, что телефон подключён к той же Wi-Fi сети / hotspot ПК —
-     * это не делает discovery сам, см. onboarding-визард (UI).
-     */
     fun listen(scope: CoroutineScope, onFound: (Announce, String) -> Unit) {
         scope.launch(Dispatchers.IO) {
             DatagramSocket(null).use { socket ->
                 socket.reuseAddress = true
                 socket.bind(InetSocketAddress(DISCOVERY_PORT))
-                val buf = ByteArray(1024)
+                val buf = ByteArray(2048)
                 while (true) {
                     val packet = DatagramPacket(buf, buf.size)
                     socket.receive(packet)
@@ -42,8 +38,7 @@ object DiscoveryClient {
                             onFound(announce, packet.address.hostAddress ?: "")
                         }
                         .onFailure {
-                            // Тихо игнорируем мусорные пакеты в сети — это нормально
-                            // для broadcast-based discovery, не логируем как ошибку.
+                            // Broadcast may contain unrelated traffic; ignore it.
                         }
                 }
             }
