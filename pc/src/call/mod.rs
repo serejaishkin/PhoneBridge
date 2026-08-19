@@ -1,13 +1,11 @@
 //! Call control-plane state on the PC.
-//!
-//! Audio is deliberately not implemented here. PhoneBridge uses native
-//! Bluetooth Classic HFP for the actual call audio path; this module owns
-//! call state and control commands.
 
 pub mod controller;
 pub mod hfp;
 #[cfg(target_os = "windows")]
 pub mod windows;
+#[cfg(target_os = "linux")]
+pub mod linux;
 
 use crate::protocol::HfpSupport;
 use std::sync::Arc;
@@ -16,10 +14,7 @@ use tokio::sync::Mutex;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CallState {
     Idle,
-    Ringing {
-        caller_number: Option<String>,
-        caller_name: Option<String>,
-    },
+    Ringing { caller_number: Option<String>, caller_name: Option<String> },
     Active,
 }
 
