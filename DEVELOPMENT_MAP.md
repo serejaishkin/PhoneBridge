@@ -51,11 +51,14 @@ PC Rust Core
 - PairingServer routes control messages through ControlSession.
 - Android reconnecting ConnectionManager with serialized writes.
 - Android discovery peer model/registry.
-- Cross-platform HfpBackend abstraction with Windows/Linux/macOS slots.
+- Cross-platform HfpBackend abstraction with dedicated Windows/Linux/macOS backend modules.
 - PC CallController.
 - Android CallManager + CallBridge + InCallService call controls.
 - PC ControlSession call dispatch.
 - Android CallBridge state stream is lifecycle-safe and deduplicates repeated call-state frames.
+- Windows HFP backend boundary isolated from core.
+- Linux BlueZ HFP backend boundary isolated from core.
+- macOS IOBluetooth HFP backend boundary isolated from core.
 
 ## P0 — connection foundation
 
@@ -74,9 +77,9 @@ PC Rust Core
 - [ ] Android PhoneBluetoothStatus capability reporting.
 - [ ] PC PcBluetoothStatus after authentication.
 - [ ] Wire CallController lifetime into live ControlSession.
-- [ ] Windows HFP capability detection/control.
-- [ ] Linux BlueZ D-Bus HFP capability detection/control.
-- [ ] macOS IOBluetooth HFP capability detection/control.
+- [ ] Windows native HFP capability detection/control.
+- [ ] Linux native BlueZ D-Bus HFP capability detection/control.
+- [ ] macOS native IOBluetooth HFP capability detection/control.
 - [ ] Audio routing diagnostics and restoration.
 
 ## P1 — discovery
@@ -114,4 +117,4 @@ Read this map first, then continue from the first unchecked P0 item. Do not run 
 
 ## Next coding target
 
-**Finish connection trust semantics, then implement the first real Windows HFP backend.**
+**Finish connection trust semantics, then replace the current HFP stubs with real Windows, Linux and macOS platform integrations.**
