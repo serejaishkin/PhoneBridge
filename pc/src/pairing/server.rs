@@ -1,7 +1,12 @@
-//! TLS control-plane server for pairing and device commands.
+//! TLS control-plane server.
+//!
+//! The server owns transport acceptance and trust lookup; protocol state is
+//! delegated to `connection::session::ControlSession`.
 
+use crate::connection::session::ControlSession;
+use crate::connection::state::ConnectionState;
 use crate::pairing::identity::Identity;
-use crate::pairing::trust::{short_code, TrustStore};
+use crate::pairing::trust::TrustStore;
 use crate::protocol::{Message, PROTOCOL_VERSION};
 use anyhow::{Context, Result};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
@@ -29,7 +34,6 @@ impl PairingServer {
             .with_no_client_auth()
             .with_single_cert(cert_der, key_der)
             .context("building TLS server config")?;
-
         Ok(Self {
             acceptor: TlsAcceptor::from(Arc::new(config)),
             trust_store,
@@ -54,7 +58,6 @@ impl PairingServer {
             let acceptor = self.acceptor.clone();
             let trust_store = self.trust_store.clone();
             let identity = self.identity.clone();
-
             tokio::spawn(async move {
                 if let Err(e) = handle_connection(stream, acceptor, trust_store, identity).await {
                     log::warn!("connection from {peer_addr} ended with error: {e}");
@@ -76,187 +79,93 @@ async fn handle_connection(
 
     let hello_line = lines.next_line().await?.context("connection closed before Hello")?;
     let hello = Message::from_line(&hello_line)?;
-
     let (peer_id, peer_name, peer_platform, peer_protocol, peer_fingerprint) = match hello {
-        Message::Hello {
-            device_id,
-            device_name,
-            platform,
-            protocol_version,
-            fingerprint,
-        } => (device_id, device_name, platform, protocol_version, fingerprint),
+        Message::Hello { device_id, device_name, platform, protocol_version, fingerprint } =>
+            (device_id, device_name, platform, protocol_version, fingerprint),
         other => anyhow::bail!("expected Hello as first message, got {:?}", other),
     };
 
     if peer_protocol != PROTOCOL_VERSION {
-        writer
-            .write_all(
-                Message::Error {
-                    message: format!(
-                        "protocol version mismatch: peer={}, pc={}",
-                        peer_protocol, PROTOCOL_VERSION
-                    ),
-                }
-                .to_line()?
-                .as_bytes(),
-            )
-            .await?;
+        writer.write_all(Message::Error {
+            message: format!("protocol version mismatch: peer={}, pc={}", peer_protocol, PROTOCOL_VERSION),
+        }.to_line()?.as_bytes()).await?;
         anyhow::bail!("unsupported protocol version from {peer_name}: {peer_protocol}");
     }
 
-    log::info!(
-        "PhoneBridge peer connected: {} ({}, {}) fingerprint={}",
-        peer_name, peer_id, peer_platform, peer_fingerprint
-    );
+    log::info!("PhoneBridge peer connected: {} ({}, {}) fingerprint={}", peer_name, peer_id, peer_platform, peer_fingerprint);
 
     let trusted = {
         let store = trust_store.lock().await;
         store.is_trusted(&peer_id, &peer_fingerprint)
     };
 
-    writer
-        .write_all(
-            Message::HelloAck {
-                device_id: identity.device_id.clone(),
-                device_name: hostname(),
-                protocol_version: PROTOCOL_VERSION,
-                trusted,
-                fingerprint: identity.fingerprint_hex(),
-            }
-            .to_line()?
-            .as_bytes(),
-        )
-        .await?;
+    let mut session = ControlSession::new();
+    let outgoing = session.handle(
+        Message::Hello {
+            device_id: peer_id.clone(),
+            device_name: peer_name.clone(),
+            platform: peer_platform,
+            protocol_version: peer_protocol,
+            fingerprint: peer_fingerprint.clone(),
+        },
+        trusted,
+    )?;
 
-    if !trusted {
-        let code = short_code(&peer_fingerprint);
-        log::info!("pairing required for {peer_name} ({peer_id}), confirmation code={code}");
-        writer
-            .write_all(
-                Message::PairChallenge {
-                    device_id: peer_id.clone(),
-                    fingerprint: peer_fingerprint.clone(),
-                    short_code: code,
-                }
-                .to_line()?
-                .as_bytes(),
-            )
-            .await?;
+    writer.write_all(Message::HelloAck {
+        device_id: identity.device_id.clone(),
+        device_name: hostname(),
+        protocol_version: PROTOCOL_VERSION,
+        trusted,
+        fingerprint: identity.fingerprint_hex(),
+    }.to_line()?.as_bytes()).await?;
+
+    for message in outgoing {
+        writer.write_all(message.to_line()?.as_bytes()).await?;
     }
 
     while let Some(line) = lines.next_line().await? {
-        let msg = Message::from_line(&line)?;
-        match msg {
-            Message::PairRequest {
-                device_id,
-                device_name,
-                fingerprint,
-            } => {
-                if device_id != peer_id || fingerprint != peer_fingerprint {
-                    writer
-                        .write_all(
-                            Message::Error {
-                                message: "pairing identity does not match Hello".into(),
+        let message = Message::from_line(&line)?;
+        let is_trusted = {
+            let store = trust_store.lock().await;
+            store.is_trusted(&peer_id, &peer_fingerprint)
+        };
+
+        match message {
+            Message::PairConfirm { device_id, short_code } => {
+                match session.handle(Message::PairConfirm { device_id: device_id.clone(), short_code }, is_trusted) {
+                    Ok(outgoing) => {
+                        for response in outgoing {
+                            let should_trust = matches!(&response, Message::PairResult { trusted: true, .. });
+                            writer.write_all(response.to_line()?.as_bytes()).await?;
+                            if should_trust {
+                                let mut store = trust_store.lock().await;
+                                store.trust(&peer_id, &peer_fingerprint)?;
                             }
-                            .to_line()?
-                            .as_bytes(),
-                        )
-                        .await?;
-                    continue;
-                }
-                let code = short_code(&peer_fingerprint);
-                log::info!("pair request from {device_name} ({device_id}), code={code}");
-                writer
-                    .write_all(
-                        Message::PairChallenge {
+                        }
+                    }
+                    Err(e) => {
+                        writer.write_all(Message::PairResult {
                             device_id,
-                            fingerprint,
-                            short_code: code,
-                        }
-                        .to_line()?
-                        .as_bytes(),
-                    )
-                    .await?;
-            }
-            Message::PairConfirm { device_id, short_code: supplied_code } => {
-                if device_id != peer_id {
-                    writer
-                        .write_all(
-                            Message::PairResult {
-                                device_id,
-                                trusted: false,
-                                message: "device id mismatch".into(),
-                            }
-                            .to_line()?
-                            .as_bytes(),
-                        )
-                        .await?;
-                    continue;
+                            trusted: false,
+                            message: e.to_string(),
+                        }.to_line()?.as_bytes()).await?;
+                    }
                 }
-
-                let expected_code = short_code(&peer_fingerprint);
-                if supplied_code != expected_code {
-                    writer
-                        .write_all(
-                            Message::PairResult {
-                                device_id: peer_id.clone(),
-                                trusted: false,
-                                message: "pairing code mismatch".into(),
-                            }
-                            .to_line()?
-                            .as_bytes(),
-                        )
-                        .await?;
-                    continue;
+            }
+            Message::Ping | Message::Pong => {
+                for response in session.handle(message, is_trusted)? {
+                    writer.write_all(response.to_line()?.as_bytes()).await?;
                 }
-
-                {
-                    let mut store = trust_store.lock().await;
-                    store.trust(&peer_id, &peer_fingerprint)?;
+            }
+            other => {
+                for response in session.handle(other, is_trusted)? {
+                    writer.write_all(response.to_line()?.as_bytes()).await?;
                 }
+            }
+        }
 
-                writer
-                    .write_all(
-                        Message::PairResult {
-                            device_id: peer_id.clone(),
-                            trusted: true,
-                            message: "device paired successfully".into(),
-                        }
-                        .to_line()?
-                        .as_bytes(),
-                    )
-                    .await?;
-                log::info!("paired device {peer_name} ({peer_id})");
-            }
-            Message::Ping => {
-                writer.write_all(Message::Pong.to_line()?.as_bytes()).await?;
-            }
-            Message::IncomingCall { caller_number, caller_name } => {
-                log::info!("incoming call from {:?} ({:?})", caller_name, caller_number);
-            }
-            Message::CallEnded => log::info!("call ended"),
-            Message::Hello { .. } => {
-                writer
-                    .write_all(
-                        Message::Error {
-                            message: "Hello is only allowed as the first message".into(),
-                        }
-                        .to_line()?
-                        .as_bytes(),
-                    )
-                    .await?;
-            }
-            Message::HelloAck { .. }
-            | Message::PairChallenge { .. }
-            | Message::PairResult { .. }
-            | Message::CallAnswer
-            | Message::CallDecline
-            | Message::PhoneBluetoothStatus { .. }
-            | Message::PcBluetoothStatus { .. }
-            | Message::Error { .. }
-            | Message::Pong => {
-                log::debug!("message received on PC control channel: {:?}", msg);
-            }
+        if matches!(session.state(), ConnectionState::Connected) {
+            log::debug!("PhoneBridge control session authenticated for {peer_id}");
         }
     }
 
@@ -265,10 +174,9 @@ async fn handle_connection(
 
 fn load_cert_chain(pem: &str) -> Result<Vec<CertificateDer<'static>>> {
     let mut reader = BufReader::new(pem.as_bytes());
-    let certs: Vec<_> = rustls_pemfile::certs(&mut reader)
+    rustls_pemfile::certs(&mut reader)
         .collect::<std::result::Result<Vec<_>, _>>()
-        .context("parsing certificate chain")?;
-    Ok(certs)
+        .context("parsing certificate chain")
 }
 
 fn load_private_key(pem: &str) -> Result<PrivateKeyDer<'static>> {
