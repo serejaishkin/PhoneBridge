@@ -1,8 +1,4 @@
 //! Platform-neutral HFP capability abstraction.
-//!
-//! The control plane uses this trait only to discover whether the host can
-//! expose an HFP Hands-Free endpoint. Actual Bluetooth audio remains native
-//! to the operating system.
 
 use crate::protocol::HfpSupport;
 
@@ -25,18 +21,8 @@ impl HfpBackend for UnsupportedHfpBackend {
 
 #[cfg(target_os = "windows")]
 use super::windows::WindowsHfpBackend;
-
 #[cfg(target_os = "linux")]
-pub mod platform {
-    use super::*;
-    pub struct LinuxHfpBackend;
-    impl HfpBackend for LinuxHfpBackend {
-        fn support(&self) -> HfpSupport { HfpSupport::Unknown }
-        fn answer_call(&self) -> Result<(), String> { Err("Linux BlueZ HFP integration pending".into()) }
-        fn decline_call(&self) -> Result<(), String> { Err("Linux BlueZ HFP integration pending".into()) }
-        fn end_call(&self) -> Result<(), String> { Err("Linux BlueZ HFP integration pending".into()) }
-    }
-}
+use super::linux::LinuxHfpBackend;
 
 #[cfg(target_os = "macos")]
 pub mod platform {
@@ -54,7 +40,7 @@ pub fn create_backend() -> Box<dyn HfpBackend> {
     #[cfg(target_os = "windows")]
     { return Box::new(WindowsHfpBackend::new()); }
     #[cfg(target_os = "linux")]
-    { return Box::new(platform::LinuxHfpBackend); }
+    { return Box::new(LinuxHfpBackend::new()); }
     #[cfg(target_os = "macos")]
     { return Box::new(platform::MacOsHfpBackend); }
     Box::new(UnsupportedHfpBackend)
