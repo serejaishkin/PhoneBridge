@@ -51,10 +51,13 @@ Transport is TLS over TCP port `17591`.
 
 Discovery uses UDP port `17592`.
 
+Wire format is newline-delimited JSON. Variants with payload use `type` + `data`; payload-free messages use only `type`. The Rust implementation is currently canonical and the Android implementation must mirror it exactly.
+
 Expected initial flow:
 
 ```text
 Discovery
+  -> TLS
   -> Hello
   <- HelloAck
   <- PairChallenge (when untrusted)
@@ -78,11 +81,12 @@ Pairing must verify both persistent identity fingerprints. TLS certificate pinni
 - Android TrustStore.
 - Discovery announcement includes PC identity fingerprint.
 - Human-readable pairing code.
-- Rust/Kotlin wire-format test foundations.
+- Rust wire framing via newline-delimited JSON.
 - Android pairing state-machine/UI wiring foundations.
 - Platform-neutral PC `connection` module.
 - Platform-neutral PC `PairingSession` state machine.
 - PC `ControlSession` combining connection and pairing state.
+- `PairingServer` now routes received control messages through `ControlSession`.
 - PC connection timeout helper.
 - Android bounded reconnect policy.
 - Android `ConnectionManager` reconnect loop.
@@ -96,16 +100,16 @@ Pairing must verify both persistent identity fingerprints. TLS certificate pinni
 
 ### P0 — finish connection foundation
 
-- [ ] Replace the old independent pairing message loop in `PairingServer` with `ControlSession` + `ConnectionManager`.
-- [ ] Define one canonical framing implementation for Rust/Kotlin.
-- [ ] Send `HelloAck` from the shared session layer.
-- [ ] Make already-trusted devices skip pairing cleanly.
+- [ ] Implement the same canonical newline-delimited JSON framing/types on Android.
+- [ ] Send `HelloAck` through the shared session layer rather than the server special case.
+- [ ] Make already-trusted devices skip pairing cleanly on both sides.
 - [ ] Reject stale/mismatched pairing state.
 - [ ] Add actual connection timeout enforcement to PC/Android transport.
 - [ ] Add explicit `Connected` transition only after authentication/trust is complete.
 - [ ] Ensure both sides can initiate Ping/Pong.
 - [ ] Handle graceful disconnect.
 - [ ] Persist Android trust data safely.
+- [ ] Move write serialization into ConnectionManager so multiple features cannot interleave frames.
 
 ### P1 — discovery
 
@@ -183,6 +187,6 @@ Pairing must verify both persistent identity fingerprints. TLS certificate pinni
 
 ## Current next coding target
 
-**P0: replace the legacy PairingServer connection loop with ControlSession/ConnectionManager, then make the wire framing canonical on both Rust and Kotlin.**
+**P0: implement the canonical protocol/framing layer on Android and finish trusted-session semantics. Then wire discovery to the peer registry.**
 
 Development is intentionally proceeding without running builds/tests at this stage. Build failures are to be fixed during the dedicated stabilization pass.
