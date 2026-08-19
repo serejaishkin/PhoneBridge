@@ -2,6 +2,7 @@ mod call;
 mod connection;
 mod discovery;
 mod pairing;
+mod platform;
 mod protocol;
 mod ui;
 
@@ -29,13 +30,15 @@ async fn main() -> anyhow::Result<()> {
     let shared_state = call::SharedState::new();
     let ui: Arc<dyn UiBackend> = Arc::new(HeadlessUi);
 
-    let hfp_status = call::check_hfp_support().await;
+    let platform = platform::current();
+    let hfp_status = platform.hfp_support();
     *shared_state.hfp_support.lock().await = hfp_status;
     ui.update_hfp_status(hfp_status).await;
+    log::info!("platform={:?}, hfp_support={:?}", platform.kind(), hfp_status);
 
-    // The pairing server owns the TLS acceptor/control-plane for now.
-    // PairingSession is kept transport-independent so the next refactor can
-    // move this state machine into ConnectionManager without changing protocol.
+    // Transport integration remains separate from platform backends.
+    // PairingSession is transport-independent and will be moved into the
+    // ConnectionManager in the next P0 refactor.
     let pairing_server = PairingServer::new(identity.clone(), trust_store.clone())?;
     let pairing_task = tokio::spawn(pairing_server.run());
 
