@@ -35,6 +35,7 @@ PC Rust Core
   ├── Identity
   ├── TrustStore
   ├── ConnectionManager
+  ├── ControlSession
   ├── PairingSession
   ├── Call state
   └── Platform abstraction
@@ -81,6 +82,7 @@ Pairing must verify both persistent identity fingerprints. TLS certificate pinni
 - Android pairing state-machine/UI wiring foundations.
 - Platform-neutral PC `connection` module.
 - Platform-neutral PC `PairingSession` state machine.
+- PC `ControlSession` combining connection and pairing state.
 - PC connection timeout helper.
 - Android bounded reconnect policy.
 - Android `ConnectionManager` reconnect loop.
@@ -94,8 +96,9 @@ Pairing must verify both persistent identity fingerprints. TLS certificate pinni
 
 ### P0 — finish connection foundation
 
-- [ ] Integrate PairingServer with ConnectionManager instead of keeping a separate message loop.
+- [ ] Replace the old independent pairing message loop in `PairingServer` with `ControlSession` + `ConnectionManager`.
 - [ ] Define one canonical framing implementation for Rust/Kotlin.
+- [ ] Send `HelloAck` from the shared session layer.
 - [ ] Make already-trusted devices skip pairing cleanly.
 - [ ] Reject stale/mismatched pairing state.
 - [ ] Add actual connection timeout enforcement to PC/Android transport.
@@ -124,17 +127,6 @@ Pairing must verify both persistent identity fingerprints. TLS certificate pinni
 - [ ] macOS IOBluetooth HFP implementation.
 - [ ] Audio routing diagnostics.
 - [ ] Restore audio state after call.
-
-### P1 — platform abstraction
-
-Core must not contain OS-specific APIs.
-
-```text
-PlatformBackend
-  ├── WindowsBackend
-  ├── MacOSBackend
-  └── LinuxBackend
-```
 
 ### P1 — media
 
@@ -191,6 +183,6 @@ PlatformBackend
 
 ## Current next coding target
 
-**P0 connection integration and canonical framing. After that, call-control protocol is the next feature.**
+**P0: replace the legacy PairingServer connection loop with ControlSession/ConnectionManager, then make the wire framing canonical on both Rust and Kotlin.**
 
 Development is intentionally proceeding without running builds/tests at this stage. Build failures are to be fixed during the dedicated stabilization pass.
