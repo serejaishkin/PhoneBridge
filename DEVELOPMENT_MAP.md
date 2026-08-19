@@ -77,7 +77,10 @@ Pairing must verify both persistent identity fingerprints. TLS certificate pinni
 - Android pairing state-machine/UI wiring foundations.
 - Platform-neutral PC `connection` module.
 - Platform-neutral PC `PairingSession` state machine.
+- PC connection timeout helper.
 - Android bounded reconnect policy module.
+- Android `ConnectionManager` now retries with bounded exponential backoff.
+- Android `DiscoveredPeer` model with discovery TTL.
 
 ## Important unfinished work
 
@@ -87,7 +90,7 @@ Pairing must verify both persistent identity fingerprints. TLS certificate pinni
 - [ ] Define one canonical framing implementation for Rust/Kotlin.
 - [ ] Make already-trusted devices skip pairing cleanly.
 - [ ] Reject stale/mismatched pairing state.
-- [ ] Add connection timeout and reconnect backoff to the actual Android manager.
+- [ ] Add actual connection timeout enforcement to PC/Android transport.
 - [ ] Add explicit `Connected` transition only after authentication/trust is complete.
 - [ ] Ensure both sides can initiate Ping/Pong.
 - [ ] Handle graceful disconnect.
