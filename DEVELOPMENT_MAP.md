@@ -33,6 +33,7 @@ PC Rust Core
   ├── Identity
   ├── TrustStore
   ├── ConnectionManager
+  ├── PairingSession
   └── Platform abstraction
         ├── Windows
         ├── macOS
@@ -74,16 +75,19 @@ Pairing must verify both persistent identity fingerprints. TLS certificate pinni
 - Human-readable pairing code.
 - Rust/Kotlin wire-format test foundations.
 - Android pairing state-machine/UI wiring foundations.
+- Platform-neutral PC `connection` module.
+- Platform-neutral PC `PairingSession` state machine.
+- Android bounded reconnect policy module.
 
 ## Important unfinished work
 
 ### P0 — finish connection foundation
 
-- [ ] Integrate PairingServer with the ConnectionManager instead of keeping a separate message loop.
+- [ ] Integrate PairingServer with ConnectionManager instead of keeping a separate message loop.
 - [ ] Define one canonical framing implementation for Rust/Kotlin.
 - [ ] Make already-trusted devices skip pairing cleanly.
 - [ ] Reject stale/mismatched pairing state.
-- [ ] Add connection timeout and reconnect backoff.
+- [ ] Add connection timeout and reconnect backoff to the actual Android manager.
 - [ ] Add explicit `Connected` transition only after authentication/trust is complete.
 - [ ] Ensure both sides can initiate Ping/Pong.
 - [ ] Handle graceful disconnect.
@@ -165,7 +169,7 @@ Planned integrations:
 6. Discovery is not authentication.
 7. Never trust a device only because it is on the same LAN.
 8. Prefer additive protocol changes over breaking changes.
-9. Keep the Android and PC implementations in lockstep.
+9. Keep Android and PC implementations in lockstep.
 10. Do not merge unfinished architectural experiments into `main`.
 
 ## Handoff procedure
@@ -181,6 +185,6 @@ When development is resumed:
 
 ## Current next coding target
 
-**P0: ConnectionManager integration + canonical protocol framing.**
+**P0: move the existing pairing state machine into the shared connection layer, then implement Android discovery and canonical framing.**
 
-The existing PC pairing server already performs TLS, reads `Hello`, checks protocol version and TrustStore, sends `HelloAck`, emits `PairChallenge`, validates `PairConfirm`, stores trust, and answers Ping/Pong. The next refactor is to move that state machine into the shared connection layer rather than maintaining a second independent connection loop.
+Important: development is intentionally proceeding without running builds/tests at this stage, per the project workflow. Build failures must be fixed when the user is ready to validate the accumulated changes.
