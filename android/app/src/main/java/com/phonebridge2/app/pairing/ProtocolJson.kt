@@ -8,7 +8,7 @@ object ProtocolJson {
     private val json = Json {
         classDiscriminator = "type"
         ignoreUnknownKeys = false
-        encodeDefaults = false
+        encodeDefaults = true
     }
 
     fun encode(message: Message): String = json.encodeToString(message)
