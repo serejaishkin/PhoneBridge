@@ -33,6 +33,10 @@ impl ConnectionManager {
         self.outbound_tx.clone()
     }
 
+    pub fn set_state(&self, state: ConnectionState) {
+        self.state_tx.send_replace(state);
+    }
+
     pub async fn serve<F>(&self, stream: ControlStream, on_message: F) -> Result<()>
     where
         F: Fn(Message) + Send + Sync + 'static,
@@ -40,7 +44,12 @@ impl ConnectionManager {
         self.state_tx.send_replace(ConnectionState::Connected);
         let (reader, mut writer) = tokio::io::split(stream);
         let mut lines = BufReader::new(reader).lines();
-        let mut outbound = self.outbound_rx.lock().await.take().context("connection manager already serving")?;
+        let mut outbound = self
+            .outbound_rx
+            .lock()
+            .await
+            .take()
+            .context("connection manager already serving")?;
         let callback = Arc::new(on_message);
 
         loop {
