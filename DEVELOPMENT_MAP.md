@@ -22,9 +22,10 @@ Android
   │    ├── DiscoveredPeer
   │    └── PeerRegistry
   ├── TLS client
+  │    └── FramedChannel
   ├── Pairing / TrustStore
   ├── ConnectionManager
-  └── Features
+  └── CallManager / InCallService
           │
           │ local LAN / TLS
           ▼
@@ -37,7 +38,7 @@ PC Rust Core
   ├── ConnectionManager
   ├── ControlSession
   ├── PairingSession
-  ├── Call state
+  ├── Call state / controller
   └── Platform abstraction
         └── HfpBackend
              ├── Windows
@@ -51,7 +52,7 @@ Transport is TLS over TCP port `17591`.
 
 Discovery uses UDP port `17592`.
 
-Wire format is newline-delimited JSON. Variants with payload use `type` + `data`; payload-free messages use only `type`. The Rust implementation is currently canonical and the Android implementation must mirror it exactly.
+Wire format is newline-delimited JSON. Variants with payload use `type` + `data`; payload-free messages use only `type`. Rust and Android now use the same serialization shape.
 
 Expected initial flow:
 
@@ -65,6 +66,24 @@ Discovery
   <- PairResult
   -> Ping
   <- Pong
+```
+
+Call flow:
+
+```text
+Android Telephony / InCallService
+        │
+        ├── IncomingCall
+        ├── CallEnded
+        │
+        ▼
+   TLS control channel
+        │
+        ▼
+PC CallController
+        │
+        ▼
+    HfpBackend
 ```
 
 Pairing must verify both persistent identity fingerprints. TLS certificate pinning is used on Android. The human-readable pairing code is confirmation, not the cryptographic secret.
@@ -82,6 +101,9 @@ Pairing must verify both persistent identity fingerprints. TLS certificate pinni
 - Discovery announcement includes PC identity fingerprint.
 - Human-readable pairing code.
 - Rust wire framing via newline-delimited JSON.
+- Android `ProtocolJson` mirror of Rust serde framing.
+- Android `FramedChannel` owns one-frame-per-line I/O.
+- Android `TlsClient` now uses `FramedChannel`.
 - Android pairing state-machine/UI wiring foundations.
 - Platform-neutral PC `connection` module.
 - Platform-neutral PC `PairingSession` state machine.
@@ -95,12 +117,14 @@ Pairing must verify both persistent identity fingerprints. TLS certificate pinni
 - Cross-platform `HfpBackend` abstraction.
 - Windows/Linux/macOS HFP backend slots isolated behind cfg modules.
 - PC call state remains independent from native audio transport.
+- PC `CallController` translates call protocol commands to HFP operations.
+- Android `CallManager` observes telephony state.
+- Android `BridgeInCallService` exposes answer/reject call controls.
 
 ## Important unfinished work
 
 ### P0 — finish connection foundation
 
-- [ ] Implement the same canonical newline-delimited JSON framing/types on Android.
 - [ ] Send `HelloAck` through the shared session layer rather than the server special case.
 - [ ] Make already-trusted devices skip pairing cleanly on both sides.
 - [ ] Reject stale/mismatched pairing state.
@@ -122,10 +146,12 @@ Pairing must verify both persistent identity fingerprints. TLS certificate pinni
 
 ### P1 — calls / HFP
 
-- [ ] Define call control messages in the shared protocol.
-- [ ] Android call-state producer.
-- [ ] Answer/decline/end commands.
-- [ ] Wire PC call commands to `HfpBackend`.
+- [ ] Connect Android `CallManager` events to the active PhoneBridge connection.
+- [ ] Connect `BridgeInCallService` events to the active PhoneBridge connection.
+- [ ] Route incoming `CallAnswer` / `CallDecline` commands to `BridgeInCallService`.
+- [ ] Send `PhoneBluetoothStatus` from Android.
+- [ ] Send `PcBluetoothStatus` after connection authentication.
+- [ ] Wire PC call controller into the live `ControlSession` loop.
 - [ ] Windows HFP detection/control implementation.
 - [ ] Linux BlueZ D-Bus HFP implementation.
 - [ ] macOS IOBluetooth HFP implementation.
@@ -187,6 +213,6 @@ Pairing must verify both persistent identity fingerprints. TLS certificate pinni
 
 ## Current next coding target
 
-**P0: implement the canonical protocol/framing layer on Android and finish trusted-session semantics. Then wire discovery to the peer registry.**
+**P0: finish trusted-session semantics and connect the existing Android call layer to the authenticated connection. Then wire PC CallController into ControlSession.**
 
 Development is intentionally proceeding without running builds/tests at this stage. Build failures are to be fixed during the dedicated stabilization pass.
