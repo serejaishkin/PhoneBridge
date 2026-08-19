@@ -1,12 +1,8 @@
-//! TLS-listener для control-plane соединений (пейринг + Hello/IncomingCall/...).
-//!
-//! Важно: это НЕ аудио-канал. Аудио (Opus/UDP) — отдельный, гораздо более
-//! чувствительный к задержке путь, здесь не рассматривается (см. README.md
-//! для полной картины протоколов).
+//! TLS control-plane server for pairing and device commands.
 
 use crate::pairing::identity::Identity;
 use crate::pairing::trust::{short_code, TrustStore};
-use crate::protocol::Message;
+use crate::protocol::{Message, PROTOCOL_VERSION};
 use anyhow::{Context, Result};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig;
@@ -29,7 +25,6 @@ impl PairingServer {
     pub fn new(identity: Arc<Identity>, trust_store: Arc<Mutex<TrustStore>>) -> Result<Self> {
         let cert_der = load_cert_chain(&identity.cert_pem)?;
         let key_der = load_private_key(&identity.key_pem)?;
-
         let config = ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(cert_der, key_der)
@@ -46,7 +41,7 @@ impl PairingServer {
         let listener = TcpListener::bind(("0.0.0.0", PAIRING_PORT))
             .await
             .with_context(|| format!("binding pairing TCP port {}", PAIRING_PORT))?;
-        log::info!("pairing server listening on :{}", PAIRING_PORT);
+        log::info!("PhoneBridge control server listening on :{}", PAIRING_PORT);
 
         loop {
             let (stream, peer_addr) = match listener.accept().await {
@@ -61,9 +56,7 @@ impl PairingServer {
             let identity = self.identity.clone();
 
             tokio::spawn(async move {
-                if let Err(e) =
-                    handle_connection(stream, acceptor, trust_store, identity).await
-                {
+                if let Err(e) = handle_connection(stream, acceptor, trust_store, identity).await {
                     log::warn!("connection from {peer_addr} ended with error: {e}");
                 }
             });
@@ -81,74 +74,188 @@ async fn handle_connection(
     let (reader, mut writer) = tokio::io::split(tls_stream);
     let mut lines = TokioBufReader::new(reader).lines();
 
-    let hello_line = lines
-        .next_line()
-        .await?
-        .context("connection closed before Hello")?;
+    let hello_line = lines.next_line().await?.context("connection closed before Hello")?;
     let hello = Message::from_line(&hello_line)?;
 
-    let (peer_id, peer_name) = match &hello {
+    let (peer_id, peer_name, peer_platform, peer_protocol, peer_fingerprint) = match hello {
         Message::Hello {
             device_id,
             device_name,
-            ..
-        } => (device_id.clone(), device_name.clone()),
-        other => {
-            anyhow::bail!("expected Hello as first message, got {:?}", other);
-        }
+            platform,
+            protocol_version,
+            fingerprint,
+        } => (device_id, device_name, platform, protocol_version, fingerprint),
+        other => anyhow::bail!("expected Hello as first message, got {:?}", other),
     };
 
-    // NOTE: на этом этапе у нас пока нет TLS client-auth (сертификат клиента не
-    // запрашивается), поэтому "fingerprint пира" сверяется на прикладном уровне
-    // отдельным сообщением, а не через rustls peer certificates. Это сознательное
-    // упрощение MVP — TODO для Kimi: перейти на with_client_cert_verifier() и
-    // сверять реальный TLS-сертификат клиента, а не JSON-поле.
-    let trusted = {
-        let store = trust_store.lock().await;
-        // fingerprint клиента в этой заготовке приходит отдельным полем в будущем
-        // сообщении PairRequest — здесь для MVP считаем untrusted, пока не добавлено.
-        store.is_trusted(&peer_id, "")
-    };
-
-    if !trusted {
-        log::info!(
-            "unpaired device connected: {peer_name} ({peer_id}) — pairing confirmation required. \
-             short_code placeholder: {}",
-            short_code(&identity.fingerprint_hex())
-        );
-        // TODO(Kimi/GUI): вместо автоответа показать в UI код подтверждения и
-        // дождаться нажатия "Confirm" пользователем, прежде чем trust_store.trust(...).
+    if peer_protocol != PROTOCOL_VERSION {
+        writer
+            .write_all(
+                Message::Error {
+                    message: format!(
+                        "protocol version mismatch: peer={}, pc={}",
+                        peer_protocol, PROTOCOL_VERSION
+                    ),
+                }
+                .to_line()?
+                .as_bytes(),
+            )
+            .await?;
+        anyhow::bail!("unsupported protocol version from {peer_name}: {peer_protocol}");
     }
 
-    let ack = Message::HelloAck {
-        device_id: identity.device_id.clone(),
-        device_name: hostname(),
-        trusted,
+    log::info!(
+        "PhoneBridge peer connected: {} ({}, {}) fingerprint={}",
+        peer_name, peer_id, peer_platform, peer_fingerprint
+    );
+
+    let trusted = {
+        let store = trust_store.lock().await;
+        store.is_trusted(&peer_id, &peer_fingerprint)
     };
-    writer.write_all(ack.to_line()?.as_bytes()).await?;
+
+    writer
+        .write_all(
+            Message::HelloAck {
+                device_id: identity.device_id.clone(),
+                device_name: hostname(),
+                protocol_version: PROTOCOL_VERSION,
+                trusted,
+                fingerprint: identity.fingerprint_hex(),
+            }
+            .to_line()?
+            .as_bytes(),
+        )
+        .await?;
+
+    if !trusted {
+        let code = short_code(&peer_fingerprint);
+        log::info!("pairing required for {peer_name} ({peer_id}), confirmation code={code}");
+        writer
+            .write_all(
+                Message::PairChallenge {
+                    device_id: peer_id.clone(),
+                    fingerprint: peer_fingerprint.clone(),
+                    short_code: code,
+                }
+                .to_line()?
+                .as_bytes(),
+            )
+            .await?;
+    }
 
     while let Some(line) = lines.next_line().await? {
         let msg = Message::from_line(&line)?;
         match msg {
+            Message::PairRequest {
+                device_id,
+                device_name,
+                fingerprint,
+            } => {
+                if device_id != peer_id || fingerprint != peer_fingerprint {
+                    writer
+                        .write_all(
+                            Message::Error {
+                                message: "pairing identity does not match Hello".into(),
+                            }
+                            .to_line()?
+                            .as_bytes(),
+                        )
+                        .await?;
+                    continue;
+                }
+                let code = short_code(&peer_fingerprint);
+                log::info!("pair request from {device_name} ({device_id}), code={code}");
+                writer
+                    .write_all(
+                        Message::PairChallenge {
+                            device_id,
+                            fingerprint,
+                            short_code: code,
+                        }
+                        .to_line()?
+                        .as_bytes(),
+                    )
+                    .await?;
+            }
+            Message::PairConfirm { device_id, short_code: supplied_code } => {
+                if device_id != peer_id {
+                    writer
+                        .write_all(
+                            Message::PairResult {
+                                device_id,
+                                trusted: false,
+                                message: "device id mismatch".into(),
+                            }
+                            .to_line()?
+                            .as_bytes(),
+                        )
+                        .await?;
+                    continue;
+                }
+
+                let expected_code = short_code(&peer_fingerprint);
+                if supplied_code != expected_code {
+                    writer
+                        .write_all(
+                            Message::PairResult {
+                                device_id: peer_id.clone(),
+                                trusted: false,
+                                message: "pairing code mismatch".into(),
+                            }
+                            .to_line()?
+                            .as_bytes(),
+                        )
+                        .await?;
+                    continue;
+                }
+
+                {
+                    let mut store = trust_store.lock().await;
+                    store.trust(&peer_id, &peer_fingerprint)?;
+                }
+
+                writer
+                    .write_all(
+                        Message::PairResult {
+                            device_id: peer_id.clone(),
+                            trusted: true,
+                            message: "device paired successfully".into(),
+                        }
+                        .to_line()?
+                        .as_bytes(),
+                    )
+                    .await?;
+                log::info!("paired device {peer_name} ({peer_id})");
+            }
             Message::Ping => {
                 writer.write_all(Message::Pong.to_line()?.as_bytes()).await?;
             }
-            Message::IncomingCall {
-                caller_number,
-                caller_name,
-            } => {
-                log::info!(
-                    "incoming call from {:?} ({:?})",
-                    caller_name,
-                    caller_number
-                );
-                // TODO(Kimi/GUI): прокинуть в UiBackend::notify_incoming_call(...)
+            Message::IncomingCall { caller_number, caller_name } => {
+                log::info!("incoming call from {:?} ({:?})", caller_name, caller_number);
             }
-            Message::CallEnded => {
-                log::info!("call ended");
+            Message::CallEnded => log::info!("call ended"),
+            Message::Hello { .. } => {
+                writer
+                    .write_all(
+                        Message::Error {
+                            message: "Hello is only allowed as the first message".into(),
+                        }
+                        .to_line()?
+                        .as_bytes(),
+                    )
+                    .await?;
             }
-            other => {
-                log::debug!("unhandled message: {:?}", other);
+            Message::HelloAck { .. }
+            | Message::PairChallenge { .. }
+            | Message::PairResult { .. }
+            | Message::CallAnswer
+            | Message::CallDecline
+            | Message::PhoneBluetoothStatus { .. }
+            | Message::PcBluetoothStatus { .. }
+            | Message::Error { .. }
+            | Message::Pong => {
+                log::debug!("message received on PC control channel: {:?}", msg);
             }
         }
     }
