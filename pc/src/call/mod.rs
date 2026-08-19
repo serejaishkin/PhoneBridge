@@ -6,6 +6,8 @@
 
 pub mod controller;
 pub mod hfp;
+#[cfg(target_os = "windows")]
+pub mod windows;
 
 use crate::protocol::HfpSupport;
 use std::sync::Arc;
