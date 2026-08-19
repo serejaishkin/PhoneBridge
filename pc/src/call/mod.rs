@@ -4,6 +4,7 @@
 //! Bluetooth Classic HFP for the actual call audio path; this module owns
 //! call state and control commands.
 
+pub mod controller;
 pub mod hfp;
 
 use crate::protocol::HfpSupport;
