@@ -23,18 +23,8 @@ impl HfpBackend for UnsupportedHfpBackend {
 use super::windows::WindowsHfpBackend;
 #[cfg(target_os = "linux")]
 use super::linux::LinuxHfpBackend;
-
 #[cfg(target_os = "macos")]
-pub mod platform {
-    use super::*;
-    pub struct MacOsHfpBackend;
-    impl HfpBackend for MacOsHfpBackend {
-        fn support(&self) -> HfpSupport { HfpSupport::Unknown }
-        fn answer_call(&self) -> Result<(), String> { Err("macOS IOBluetooth HFP integration pending".into()) }
-        fn decline_call(&self) -> Result<(), String> { Err("macOS IOBluetooth HFP integration pending".into()) }
-        fn end_call(&self) -> Result<(), String> { Err("macOS IOBluetooth HFP integration pending".into()) }
-    }
-}
+use super::macos::MacOsHfpBackend;
 
 pub fn create_backend() -> Box<dyn HfpBackend> {
     #[cfg(target_os = "windows")]
@@ -42,6 +32,6 @@ pub fn create_backend() -> Box<dyn HfpBackend> {
     #[cfg(target_os = "linux")]
     { return Box::new(LinuxHfpBackend::new()); }
     #[cfg(target_os = "macos")]
-    { return Box::new(platform::MacOsHfpBackend); }
+    { return Box::new(MacOsHfpBackend::new()); }
     Box::new(UnsupportedHfpBackend)
 }
