@@ -120,6 +120,8 @@ Pairing must verify both persistent identity fingerprints. TLS certificate pinni
 - PC `CallController` translates call protocol commands to HFP operations.
 - Android `CallManager` observes telephony state.
 - Android `BridgeInCallService` exposes answer/reject call controls.
+- Android `CallBridge` connects call state/commands to `ConnectionManager`.
+- PC `ControlSession` can dispatch authenticated call messages to `CallController`.
 
 ## Important unfinished work
 
@@ -146,12 +148,10 @@ Pairing must verify both persistent identity fingerprints. TLS certificate pinni
 
 ### P1 — calls / HFP
 
-- [ ] Connect Android `CallManager` events to the active PhoneBridge connection.
-- [ ] Connect `BridgeInCallService` events to the active PhoneBridge connection.
-- [ ] Route incoming `CallAnswer` / `CallDecline` commands to `BridgeInCallService`.
+- [ ] Connect `BridgeInCallService` lifecycle to `CallBridge` without service-instance coupling.
 - [ ] Send `PhoneBluetoothStatus` from Android.
 - [ ] Send `PcBluetoothStatus` after connection authentication.
-- [ ] Wire PC call controller into the live `ControlSession` loop.
+- [ ] Wire PC `CallController` lifetime into the live `ControlSession` loop.
 - [ ] Windows HFP detection/control implementation.
 - [ ] Linux BlueZ D-Bus HFP implementation.
 - [ ] macOS IOBluetooth HFP implementation.
@@ -213,6 +213,6 @@ Pairing must verify both persistent identity fingerprints. TLS certificate pinni
 
 ## Current next coding target
 
-**P0: finish trusted-session semantics and connect the existing Android call layer to the authenticated connection. Then wire PC CallController into ControlSession.**
+**P0: finish trusted-session semantics and live lifecycle wiring. Then begin the Windows HFP backend, followed by Linux BlueZ and macOS IOBluetooth.**
 
 Development is intentionally proceeding without running builds/tests at this stage. Build failures are to be fixed during the dedicated stabilization pass.
