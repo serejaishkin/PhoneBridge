@@ -1,62 +1,75 @@
-//! Общий протокол сообщений PC <-> Android поверх TLS-соединения.
+//! Общий control-plane протокол PC <-> Android поверх TLS.
 //!
-//! Формат: одна JSON-строка на сообщение, разделитель — '\n' (newline-delimited JSON).
-//! Это сознательно упрощённый вариант по сравнению с бинарным протоколом v1 —
-//! на этапе pairing/control-plane важнее читаемость и лёгкость отладки, чем
-//! производительность (аудио по-прежнему идёт отдельным UDP-потоком, сюда не входит).
+//! Формат: newline-delimited JSON. Все варианты с payload используют
+//! {"type":"Variant","data":{...}}, а варианты без payload — {"type":"Ping"}.
 
 use serde::{Deserialize, Serialize};
+
+pub const PROTOCOL_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 pub enum Message {
-    /// Первое сообщение после установления TLS-соединения: кто я такой.
     Hello {
         device_id: String,
         device_name: String,
         /// "android" | "windows" | "macos" | "linux"
         platform: String,
-        /// Версия протокола, чтобы будущие несовместимые изменения не роняли соединение молча.
         protocol_version: u32,
+        /// SHA-256 fingerprint of the peer's persistent identity certificate.
+        fingerprint: String,
     },
 
-    /// Ответ на Hello: подтверждение + статус доверия (см. pairing::TrustStore).
     HelloAck {
         device_id: String,
         device_name: String,
+        protocol_version: u32,
         trusted: bool,
+        fingerprint: String,
     },
 
-    /// Keepalive в обе стороны.
+    /// Sent by an untrusted peer after Hello. The fingerprint is the identity
+    /// fingerprint of the device, not the TLS transport certificate of the PC.
+    PairRequest {
+        device_id: String,
+        device_name: String,
+        fingerprint: String,
+    },
+
+    /// PC tells Android which human-readable code must be confirmed by the user.
+    PairChallenge {
+        device_id: String,
+        fingerprint: String,
+        short_code: String,
+    },
+
+    /// Explicit user confirmation. The code must match the challenge currently
+    /// associated with this connection.
+    PairConfirm {
+        device_id: String,
+        short_code: String,
+    },
+
+    PairResult {
+        device_id: String,
+        trusted: bool,
+        message: String,
+    },
+
     Ping,
     Pong,
 
-    /// Android -> PC: входящий звонок. Аудио сюда НЕ входит — оно пойдёт через
-    /// нативный Bluetooth HFP (см. AI_HANDOFF_GUI.md, раздел 1). Это только
-    /// control-plane для отображения на ПК и кнопок Answer/Decline.
     IncomingCall {
         caller_number: Option<String>,
         caller_name: Option<String>,
     },
-
-    /// Звонок завершился (принят где-то ещё / сброшен / положили трубку).
     CallEnded,
-
-    /// PC -> Android: пользователь нажал "Answer" в трее/окне.
     CallAnswer,
-
-    /// PC -> Android: пользователь нажал "Decline".
     CallDecline,
 
-    /// Android -> PC: статус поддержки Bluetooth Classic HFP самим телефоном
-    /// (обычно true) — полезно для диагностики на экране статуса.
     PhoneBluetoothStatus { hfp_calls_toggle_enabled: bool },
-
-    /// PC -> Android: статус проверки HFP-клиента на стороне PC.
-    /// См. pc/src/call/hfp_check.rs — реальная детекция pending, это заготовка API.
     PcBluetoothStatus { hfp_supported: HfpSupport },
 
-    /// Общая ошибка протокола / отказ.
     Error { message: String },
 }
 
@@ -64,7 +77,6 @@ pub enum Message {
 pub enum HfpSupport {
     Supported,
     Unsupported,
-    /// Проверка ещё не реализована для этой платформы / не удалось определить.
     Unknown,
 }
 
@@ -77,5 +89,27 @@ impl Message {
 
     pub fn from_line(line: &str) -> anyhow::Result<Self> {
         Ok(serde_json::from_str(line.trim_end())?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pairing_messages_use_expected_wire_format() {
+        let msg = Message::PairChallenge {
+            device_id: "pb2-phone".into(),
+            fingerprint: "AABBCCDD".into(),
+            short_code: "AABB-CCDD".into(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert_eq!(json, r#"{"type":"PairChallenge","data":{"device_id":"pb2-phone","fingerprint":"AABBCCDD","short_code":"AABB-CCDD"}}"#);
+        assert!(matches!(Message::from_line(&json).unwrap(), Message::PairChallenge { .. }));
+    }
+
+    #[test]
+    fn empty_messages_have_no_data_field() {
+        assert_eq!(serde_json::to_string(&Message::Ping).unwrap(), r#"{"type":"Ping"}"#);
     }
 }
