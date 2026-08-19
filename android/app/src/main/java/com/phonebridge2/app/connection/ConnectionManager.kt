@@ -17,13 +17,17 @@ import kotlinx.coroutines.sync.withLock
 class ConnectionManager(
     private val tlsClient: TlsClient,
     private val scope: CoroutineScope,
-    private val onMessage: suspend (Message) -> Unit = {},
 ) {
     private val _state = MutableStateFlow(ConnectionState.DISCONNECTED)
     val state: StateFlow<ConnectionState> = _state.asStateFlow()
     private var job: Job? = null
     private var connection: TlsClient.Connection? = null
     private val writeMutex = Mutex()
+    private var onMessage: suspend (Message) -> Unit = {}
+
+    fun setMessageHandler(handler: suspend (Message) -> Unit) {
+        onMessage = handler
+    }
 
     fun connect(host: String, port: Int, fingerprint: String, hello: Message.Hello) {
         job?.cancel()
