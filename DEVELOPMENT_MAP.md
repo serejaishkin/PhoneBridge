@@ -79,8 +79,12 @@ Pairing must verify both persistent identity fingerprints. TLS certificate pinni
 - Platform-neutral PC `PairingSession` state machine.
 - PC connection timeout helper.
 - Android bounded reconnect policy module.
-- Android `ConnectionManager` now retries with bounded exponential backoff.
+- Android `ConnectionManager` retries with bounded exponential backoff.
 - Android `DiscoveredPeer` model with discovery TTL.
+- Android UDP discovery client now maintains discovered peers and expires stale records.
+- PC `PlatformBackend` abstraction.
+- Windows, macOS and Linux backend skeletons.
+- PC daemon now selects the platform backend at runtime/compile target and reports HFP capability.
 
 ## Important unfinished work
 
@@ -98,12 +102,12 @@ Pairing must verify both persistent identity fingerprints. TLS certificate pinni
 
 ### P1 — discovery
 
-- [ ] Android UDP discovery client.
+- [x] Android UDP discovery client.
 - [ ] Parse and validate PC announcement.
 - [ ] Prefer discovered PC fingerprint for TLS pinning.
 - [ ] Handle multiple PCs.
-- [ ] Expire stale discoveries.
-- [ ] Keep discovery independent from the transport connection.
+- [x] Expire stale discoveries.
+- [x] Keep discovery independent from the transport connection.
 
 ### P1 — platform abstraction
 
@@ -116,7 +120,7 @@ PlatformBackend
   └── LinuxBackend
 ```
 
-Planned integrations:
+Implemented as skeletons. Next work is native integration:
 
 - Windows: WinRT/Bluetooth APIs.
 - Linux: BlueZ/D-Bus.
@@ -124,8 +128,9 @@ Planned integrations:
 
 ### P1 — calls / HFP
 
+- [x] Cross-platform backend interface.
 - [ ] Bluetooth capability detection.
-- [ ] Phone call state protocol.
+- [ ] Phone call state protocol handling.
 - [ ] Answer/decline/end commands.
 - [ ] HFP connection backend per OS.
 - [ ] Audio routing.
@@ -177,17 +182,15 @@ Planned integrations:
 
 ## Handoff procedure
 
-When development is resumed:
-
 1. Read this file.
 2. Read `NEXT_STEPS.md`.
 3. Inspect the latest commits on `feature/tls-pairing-v1`.
 4. Continue from the first unchecked P0 item.
-5. Do not start GUI/media/HFP work until the P0 connection foundation is coherent.
+5. Keep Windows/macOS/Linux changes behind `PlatformBackend`.
 6. After each major module, update this map.
 
 ## Current next coding target
 
-**P0: move the existing pairing state machine into the shared connection layer, then implement Android discovery and canonical framing.**
+**P0: integrate PairingSession into ConnectionManager and define canonical framing. Then connect discovered Android peers to the TLS client using the advertised fingerprint.**
 
-Important: development is intentionally proceeding without running builds/tests at this stage, per the project workflow. Build failures must be fixed when the user is ready to validate the accumulated changes.
+Development is intentionally proceeding without running builds/tests at this stage. Validation is a separate stabilization pass requested by the user.
