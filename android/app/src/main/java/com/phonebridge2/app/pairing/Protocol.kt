@@ -16,6 +16,10 @@ sealed class Message {
     @Serializable data class PairChallengeData(val device_id: String, val fingerprint: String, val short_code: String) : MessageData
     @Serializable @SerialName("PairConfirm") data class PairConfirm(val data: PairConfirmData) : Message()
     @Serializable data class PairConfirmData(val device_id: String, val short_code: String) : MessageData
+    @Serializable @SerialName("PairApprove") data class PairApprove(val data: PairApproveData) : Message()
+    @Serializable data class PairApproveData(val device_id: String, val short_code: String) : MessageData
+    @Serializable @SerialName("PairReject") data class PairReject(val data: PairRejectData) : Message()
+    @Serializable data class PairRejectData(val device_id: String, val reason: String) : MessageData
     @Serializable @SerialName("PairResult") data class PairResult(val data: PairResultData) : Message()
     @Serializable data class PairResultData(val device_id: String, val trusted: Boolean, val message: String) : MessageData
     @Serializable @SerialName("Ping") object Ping : Message()
