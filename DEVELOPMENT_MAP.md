@@ -49,6 +49,7 @@ PC Rust Core
 - `Ping` / `Pong` heartbeat frames.
 - `Disconnect { reason }` graceful close frame.
 - Android does not enter `CONNECTED` until a trusted `HelloAck` or successful `PairResult` is received.
+- `PairApprove` / `PairReject` are explicit desktop-side pairing decision messages.
 
 ## Completed
 - PC TLS server and Android TLS client foundations.
@@ -75,6 +76,7 @@ PC Rust Core
 - Android pairing wizard state model and Compose confirmation screen.
 - Android main GUI wired to discovered PCs, selected PC persistence and live pairing state.
 - Android explicit Forget paired PC control.
+- Android mirrors explicit PC pairing approval/rejection messages.
 - Automatic multi-route reconnect coordinator foundation.
 - PC Bluetooth native stream transport contract for RFCOMM/L2CAP.
 - PC per-OS Bluetooth backend selector for Windows/Linux/macOS.
@@ -86,7 +88,9 @@ PC Rust Core
 - Windows native RFCOMM transport module is exposed through the platform layer.
 - Cross-platform Iced desktop GUI with dashboard, pairing wizard and diagnostics views.
 - Desktop GUI launches on its own thread so the Tokio daemon is not blocked.
-- PC pairing server now emits live pairing challenge/result events to the shared UI backend.
+- PC pairing server emits live pairing challenge/result events to the shared UI backend.
+- PC protocol and ControlSession accept explicit pairing approve/reject operations.
+- Desktop GUI contains Allow/Reject/Forget controls and exposes their UI events.
 - PC discovery peer registry with TTL.
 - PC CallController and Android CallManager/CallBridge/InCallService foundation.
 - Dedicated Windows/Linux/macOS HFP backend boundaries.
@@ -121,7 +125,10 @@ PC Rust Core
 - [x] Android displays the PC pairing challenge and explicit confirmation action.
 - [x] Android persists trusted PC identity after successful PairResult/HelloAck.
 - [x] PC pairing server forwards live challenge/result events to the shared UI state/backend.
-- [ ] Bind the desktop Pairing wizard controls directly to the live pairing session.
+- [x] Protocol supports explicit PC Allow/Reject decisions.
+- [x] Android consumes PC Allow/Reject decisions.
+- [x] Desktop GUI exposes Allow/Reject/Forget actions.
+- [ ] Bind desktop Allow/Reject actions to the live session writer.
 - [x] Android explicit "Forget this PC" control.
 - [ ] PC explicit "Forget this phone" control in the desktop GUI.
 - [ ] Add a PC-side command/API for revoking trust from the GUI.
@@ -174,4 +181,4 @@ PC Rust Core
 Read this map first, then continue from the first unchecked P0 item. Do not run builds/tests until the planned stabilization pass unless explicitly requested.
 
 ## Next coding target
-**Bind the desktop Pairing wizard controls to live pairing state and add PC trust revocation, then adapt the Windows WinRT StreamSocket to the common PhoneBridge byte-stream/TLS connector.**
+**Bind desktop Allow/Reject/Forget UI events to the live session writer and PC TrustStore, then adapt the Windows WinRT StreamSocket to the common PhoneBridge byte-stream/TLS connector.**
