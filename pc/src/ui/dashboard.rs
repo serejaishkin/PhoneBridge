@@ -1,5 +1,5 @@
-//! Basic dashboard model for the first desktop GUI.
-//! A real window/tray frontend can bind directly to this model.
+//! Desktop dashboard view model shared by Windows, macOS and Linux.
+//! Rendering stays separate from the connection and pairing layers.
 
 use super::{BasicUi, UiState};
 use crate::protocol::HfpSupport;
@@ -12,6 +12,8 @@ pub struct Dashboard {
     pub hfp: String,
     pub status: String,
     pub pairing_code: Option<String>,
+    pub media_enabled: bool,
+    pub microphone_enabled: bool,
 }
 
 impl Dashboard {
@@ -23,6 +25,8 @@ impl Dashboard {
             hfp: match state.hfp_support { HfpSupport::Supported => "Available", HfpSupport::Unsupported => "Unavailable", HfpSupport::Unknown => "Unknown" }.into(),
             status: state.status.clone(),
             pairing_code: state.pairing_code.clone(),
+            media_enabled: true,
+            microphone_enabled: true,
         }
     }
 
