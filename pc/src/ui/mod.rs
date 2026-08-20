@@ -29,17 +29,7 @@ pub struct DesktopUiState {
 
 impl Default for DesktopUiState {
     fn default() -> Self {
-        Self {
-            screen: UiScreen::Dashboard,
-            connected: false,
-            peer_name: None,
-            peer_address: None,
-            hfp: HfpSupport::Unknown,
-            media_enabled: true,
-            microphone_enabled: true,
-            pairing_code: None,
-            diagnostic_lines: Vec::new(),
-        }
+        Self { screen: UiScreen::Dashboard, connected: false, peer_name: None, peer_address: None, hfp: HfpSupport::Unknown, media_enabled: true, microphone_enabled: true, pairing_code: None, diagnostic_lines: Vec::new() }
     }
 }
 
@@ -49,6 +39,8 @@ pub trait UiBackend: Send + Sync {
     async fn notify_call_ended(&self);
     async fn update_connection_status(&self, connected: bool, peer_name: Option<&str>);
     async fn update_hfp_status(&self, status: HfpSupport);
+    async fn update_pairing_challenge(&self, device_id: &str, fingerprint: &str, short_code: &str);
+    async fn update_pairing_result(&self, trusted: bool, message: &str);
 }
 
 pub struct HeadlessUi;
@@ -59,4 +51,6 @@ impl UiBackend for HeadlessUi {
     async fn notify_call_ended(&self) { log::info!("[UI] call ended"); }
     async fn update_connection_status(&self, connected: bool, peer_name: Option<&str>) { log::info!("[UI] connection status: {} ({})", if connected { "connected" } else { "disconnected" }, peer_name.unwrap_or("-")); }
     async fn update_hfp_status(&self, status: HfpSupport) { log::info!("[UI] HFP support: {:?}", status); }
+    async fn update_pairing_challenge(&self, device_id: &str, _fingerprint: &str, short_code: &str) { log::info!("[UI] pairing request from {device_id}; confirmation code={short_code}"); }
+    async fn update_pairing_result(&self, trusted: bool, message: &str) { log::info!("[UI] pairing result trusted={trusted}: {message}"); }
 }
