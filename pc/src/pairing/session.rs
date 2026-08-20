@@ -10,54 +10,49 @@ pub enum PairingState {
     Trusted,
 }
 
-pub struct PairingSession {
-    state: PairingState,
-}
+pub struct PairingSession { state: PairingState }
 
 impl PairingSession {
     pub fn new() -> Self { Self { state: PairingState::AwaitingHello } }
     pub fn state(&self) -> &PairingState { &self.state }
 
-    pub fn accept_hello(
-        &mut self,
-        device_id: String,
-        fingerprint: String,
-        protocol_version: u32,
-        trusted: bool,
-        challenge_code: String,
-    ) -> Result<Option<Message>> {
+    pub fn accept_hello(&mut self, device_id: String, fingerprint: String, protocol_version: u32, trusted: bool, challenge_code: String) -> Result<Option<Message>> {
         if protocol_version != PROTOCOL_VERSION { bail!("protocol version mismatch: peer={protocol_version}, pc={PROTOCOL_VERSION}"); }
-
         match &self.state {
             PairingState::Trusted if trusted => return Ok(None),
-            PairingState::AwaitingConfirmation { device_id: old_id, fingerprint: old_fp, .. }
-                if old_id == &device_id && old_fp == &fingerprint => {
-                    bail!("duplicate Hello while pairing confirmation is pending");
-                }
+            PairingState::AwaitingConfirmation { device_id: old_id, fingerprint: old_fp, .. } if old_id == &device_id && old_fp == &fingerprint => bail!("duplicate Hello while pairing confirmation is pending"),
             PairingState::AwaitingConfirmation { .. } => bail!("pairing session already belongs to another device"),
             _ => {}
         }
-
-        if trusted {
-            self.state = PairingState::Trusted;
-            return Ok(None);
-        }
-
-        self.state = PairingState::AwaitingConfirmation {
-            device_id: device_id.clone(), fingerprint: fingerprint.clone(), code: challenge_code.clone(),
-        };
+        if trusted { self.state = PairingState::Trusted; return Ok(None); }
+        self.state = PairingState::AwaitingConfirmation { device_id: device_id.clone(), fingerprint: fingerprint.clone(), code: challenge_code.clone() };
         Ok(Some(Message::PairChallenge { device_id, fingerprint, short_code: challenge_code }))
     }
 
     pub fn confirm(&mut self, device_id: &str, fingerprint: &str, code: &str) -> Result<Message> {
-        let PairingState::AwaitingConfirmation { device_id: expected_id, fingerprint: expected_fp, code: expected_code } = &self.state else {
-            bail!("pairing confirmation is not expected in the current state");
-        };
+        let PairingState::AwaitingConfirmation { device_id: expected_id, fingerprint: expected_fp, code: expected_code } = &self.state else { bail!("pairing confirmation is not expected in the current state"); };
         if expected_id != device_id { bail!("pairing device id mismatch"); }
         if expected_fp != fingerprint { bail!("pairing fingerprint mismatch"); }
         if expected_code != code { bail!("pairing code mismatch"); }
         self.state = PairingState::Trusted;
         Ok(Message::PairResult { device_id: device_id.to_owned(), trusted: true, message: "device paired successfully".into() })
+    }
+
+    /// Approve the pending request from the desktop GUI after the user verifies the code.
+    pub fn approve(&mut self, device_id: &str, code: &str) -> Result<Message> {
+        let PairingState::AwaitingConfirmation { device_id: expected_id, code: expected_code, .. } = &self.state else { bail!("no pending pairing request"); };
+        if expected_id != device_id { bail!("pairing device id mismatch"); }
+        if expected_code != code { bail!("pairing code mismatch"); }
+        self.state = PairingState::Trusted;
+        Ok(Message::PairResult { device_id: device_id.to_owned(), trusted: true, message: "PC approved pairing".into() })
+    }
+
+    /// Reject and clear the pending request so the same session cannot be reused.
+    pub fn reject(&mut self, device_id: &str, reason: &str) -> Result<Message> {
+        let PairingState::AwaitingConfirmation { device_id: expected_id, .. } = &self.state else { bail!("no pending pairing request"); };
+        if expected_id != device_id { bail!("pairing device id mismatch"); }
+        self.state = PairingState::AwaitingHello;
+        Ok(Message::PairResult { device_id: device_id.to_owned(), trusted: false, message: reason.to_owned() })
     }
 }
 
