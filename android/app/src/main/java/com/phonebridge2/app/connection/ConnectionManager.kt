@@ -22,17 +22,15 @@ class ConnectionManager(
     private val _state = MutableStateFlow(ConnectionState.DISCONNECTED)
     val state: StateFlow<ConnectionState> = _state.asStateFlow()
     private var job: Job? = null
+    private var heartbeatJob: Job? = null
     private var connection: TlsClient.Connection? = null
     private val writeMutex = Mutex()
     private var onMessage: suspend (Message) -> Unit = {}
 
-    fun setMessageHandler(handler: suspend (Message) -> Unit) {
-        onMessage = handler
-    }
+    fun setMessageHandler(handler: suspend (Message) -> Unit) { onMessage = handler }
 
     fun connect(host: String, port: Int, fingerprint: String, hello: Message.Hello) {
-        job?.cancel()
-        reconnectPolicy.reset()
+        job?.cancel(); heartbeatJob?.cancel(); reconnectPolicy.reset()
         job = scope.launch(Dispatchers.IO) {
             var firstAttempt = true
             while (isActive) {
@@ -43,26 +41,40 @@ class ConnectionManager(
                     connection = c
                     _state.value = ConnectionState.CONNECTED
                     reconnectPolicy.reset()
+                    startHeartbeat()
 
                     while (isActive) {
-                        val message = tlsClient.readMessage(c)
-                        if (message is Message.Ping) {
-                            send(Message.Pong)
-                        } else {
-                            onMessage(message)
+                        when (val message = tlsClient.readMessage(c)) {
+                            is Message.Ping -> send(Message.Pong)
+                            is Message.Pong -> Unit
+                            is Message.Disconnect -> {
+                                _state.value = ConnectionState.DISCONNECTED
+                                break
+                            }
+                            else -> onMessage(message)
                         }
                     }
                 } catch (_: Throwable) {
                     if (!isActive) break
                 } finally {
-                    connection?.close()
-                    connection = null
+                    heartbeatJob?.cancel(); heartbeatJob = null
+                    connection?.close(); connection = null
                 }
-
                 if (!isActive) break
                 delay(reconnectPolicy.nextDelay())
             }
             _state.value = ConnectionState.DISCONNECTED
+        }
+    }
+
+    private fun startHeartbeat() {
+        heartbeatJob?.cancel()
+        heartbeatJob = scope.launch(Dispatchers.IO) {
+            while (isActive) {
+                delay(15_000)
+                if (!isActive) break
+                send(Message.Ping)
+            }
         }
     }
 
@@ -75,11 +87,14 @@ class ConnectionManager(
         }
     }
 
-    fun disconnect() {
-        job?.cancel()
-        connection?.close()
-        connection = null
-        reconnectPolicy.reset()
-        _state.value = ConnectionState.DISCONNECTED
+    fun disconnect(reason: String = "local shutdown") {
+        job?.cancel(); heartbeatJob?.cancel()
+        scope.launch(Dispatchers.IO) {
+            writeMutex.withLock {
+                connection?.let { runCatching { tlsClient.sendMessage(it, Message.Disconnect(Message.DisconnectData(reason))) } }
+            }
+            connection?.close(); connection = null
+        }
+        reconnectPolicy.reset(); _state.value = ConnectionState.DISCONNECTED
     }
 }
