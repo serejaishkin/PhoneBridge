@@ -23,6 +23,7 @@ impl ControlSession {
     pub fn pairing(&self) -> &PairingSession { &self.pairing }
     pub fn timeout(&self) -> Duration { let limit = if matches!(self.state, ConnectionState::Connected) { IDLE_TIMEOUT } else { HANDSHAKE_TIMEOUT }; limit.saturating_sub(self.last_activity.elapsed()) }
     pub fn is_expired(&self) -> bool { self.timeout().is_zero() }
+    pub fn is_authenticated(&self) -> bool { matches!(self.state, ConnectionState::Connected) }
 
     pub async fn handle(&mut self, message: Message, trusted: bool) -> Result<Vec<Message>> { self.handle_with_peer(message, trusted, None).await }
 
@@ -43,17 +44,17 @@ impl ControlSession {
                 if trusted { self.state = ConnectionState::Connected; }
                 outgoing.push(result);
             }
-            Message::Ping => { if !matches!(self.state, ConnectionState::Connected) { bail!("Ping before pairing completes"); } outgoing.push(Message::Pong); }
+            Message::Ping => { if !self.is_authenticated() { bail!("Ping before pairing completes"); } outgoing.push(Message::Pong); }
             Message::Pong => {}
             Message::Disconnect { .. } => {}
             ref message @ (Message::IncomingCall { .. } | Message::CallAnswer | Message::CallDecline | Message::CallEnded | Message::PhoneBluetoothStatus { .. }) => {
-                if !matches!(self.state, ConnectionState::Connected) { bail!("call message before pairing completes"); }
+                if !self.is_authenticated() { bail!("call message before pairing completes"); }
                 if let Some(calls) = &self.calls {
                     let controller = crate::call::CallController::new(calls.clone(), crate::call::hfp::create_backend());
                     if let Some(response) = controller.handle(message).await.map_err(anyhow::Error::msg)? { outgoing.push(response); }
                 }
             }
-            _ => { if !matches!(self.state, ConnectionState::Connected) { bail!("message is not allowed before pairing completes"); } }
+            _ => { if !self.is_authenticated() { bail!("message is not allowed before pairing completes"); } }
         }
         Ok(outgoing)
     }
