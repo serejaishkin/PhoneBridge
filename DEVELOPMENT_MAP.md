@@ -15,12 +15,13 @@ Android
   ├── TLS / FramedChannel
   ├── Pairing / TrustStore
   ├── ConnectionManager / authenticated handshake / heartbeat
-  ├── ConnectionRoute / AutoReconnect
+  ├── EndpointStore / RoutePlanner
   └── CallManager / InCallService / CallBridge
           │
           ▼
 PC Rust Core
   ├── Discovery / UDP LAN + hotspot
+  ├── PeerRegistry / TTL
   ├── TLS control plane
   ├── Protocol
   ├── Identity / TrustStore
@@ -63,9 +64,11 @@ PC Rust Core
 - PC graceful `Disconnect` handling.
 - PC timeout sends `Disconnect` before socket shutdown.
 - Android discovery peer model/registry.
-- Ordered Android Wi-Fi/hotspot/Bluetooth-PAN route model.
+- Android persistent PC endpoint store.
+- Android deterministic Wi-Fi/hotspot/Bluetooth-PAN route planner.
 - Automatic multi-route reconnect coordinator.
 - PC Bluetooth native transport boundary for RFCOMM/L2CAP implementations.
+- PC discovery peer registry with TTL.
 - PC CallController and Android CallManager/CallBridge/InCallService foundation.
 - Dedicated Windows/Linux/macOS HFP backend boundaries.
 
@@ -80,7 +83,8 @@ PC Rust Core
 - [x] Android persistent trust data integration in PairingManager.
 - [x] Keep Android feature writes serialized through ConnectionManager.
 - [ ] PC-side periodic heartbeat sender.
-- [ ] Persist selected PC route and retry it before discovery.
+- [x] Android can persist the last PC endpoint independently of discovery.
+- [ ] Persist selected route metadata and prefer it during reconnect.
 - [ ] Complete direct Bluetooth RFCOMM/L2CAP stream adapter per OS.
 
 ## P1 — calls / HFP
@@ -96,11 +100,12 @@ PC Rust Core
 ## P1 — discovery
 - [x] UDP discovery on normal Wi-Fi/LAN.
 - [x] UDP discovery usable on a PC-created hotspot when broadcast is permitted by the OS/firewall.
+- [x] Android PeerRegistry model and TTL pruning primitive.
+- [x] PC PeerRegistry model and TTL pruning primitive.
 - [ ] DiscoveryClient → PeerRegistry lifecycle.
-- [ ] Periodic TTL pruning.
 - [ ] Validate announcements.
 - [x] Discovered fingerprint carried into TLS pinning.
-- [ ] Persist selected PC.
+- [x] Persist selected PC endpoint.
 - [ ] Advertise direct Bluetooth endpoint when native Bluetooth backend is available.
 
 ## P1 — media
@@ -126,4 +131,4 @@ PC Rust Core
 Read this map first, then continue from the first unchecked P0 item. Do not run builds/tests until the planned stabilization pass unless explicitly requested.
 
 ## Next coding target
-**Persist selected PC routes, finish Android discovery→connect lifecycle, then implement the direct Bluetooth stream adapter per Windows/Linux/macOS.**
+**Wire Android DiscoveryClient to PeerRegistry and EndpointStore, persist the preferred route, then implement the direct Bluetooth stream adapter per Windows/Linux/macOS.**
