@@ -1,11 +1,4 @@
 //! UDP broadcast discovery в локальной сети.
-//!
-//! Сознательно НЕ используем BLE для discovery в этой версии (в отличие от
-//! оригинального PhoneBridge v1) — см. AI_HANDOFF_GUI.md: если телефон и ПК
-//! всё равно должны быть в одной Wi-Fi сети для медиа/сигналинга, BLE
-//! добавляет сложность (рантайм-разрешения Android 12+, MTU) без реальной
-//! выгоды. UDP broadcast на порту ниже работает как только оба устройства
-//! в одной подсети — этого достаточно.
 
 use crate::pairing::identity::Identity;
 use anyhow::Result;
@@ -23,9 +16,10 @@ pub struct Announce {
     pub device_name: String,
     pub platform: String,
     pub pairing_port: u16,
+    /// SHA-256 fingerprint of the PC persistent identity certificate.
+    pub fingerprint: String,
 }
 
-/// Периодически рассылает Announce в broadcast-адрес подсети.
 pub async fn run_broadcaster(identity: Arc<Identity>) -> Result<()> {
     let socket = UdpSocket::bind(("0.0.0.0", 0)).await?;
     socket.set_broadcast(true)?;
@@ -35,12 +29,11 @@ pub async fn run_broadcaster(identity: Arc<Identity>) -> Result<()> {
         device_name: hostname(),
         platform: current_platform().to_string(),
         pairing_port: crate::pairing::server::PAIRING_PORT,
+        fingerprint: identity.fingerprint_hex(),
     };
     let payload = serde_json::to_vec(&announce)?;
 
     loop {
-        // 255.255.255.255 работает в большинстве домашних сетей; если нет —
-        // TODO: определять broadcast-адрес конкретного интерфейса вместо global.
         if let Err(e) = socket
             .send_to(&payload, ("255.255.255.255", DISCOVERY_PORT))
             .await
@@ -51,8 +44,6 @@ pub async fn run_broadcaster(identity: Arc<Identity>) -> Result<()> {
     }
 }
 
-/// Слушает входящие Announce от телефонов (для будущего сценария "PC ищет телефон",
-/// сейчас основной сценарий — телефон ищет PC, но симметричный listener пригодится).
 pub async fn run_listener<F>(mut on_announce: F) -> Result<()>
 where
     F: FnMut(Announce, std::net::SocketAddr) + Send + 'static,
@@ -61,9 +52,7 @@ where
     let mut buf = [0u8; 1024];
     loop {
         let (n, addr) = socket.recv_from(&mut buf).await?;
-        let received: Vec<u8> = buf[..n].to_vec();
-        let parsed: Result<Announce, _> = serde_json::from_slice(&received);
-        match parsed {
+        match serde_json::from_slice::<Announce>(&buf[..n]) {
             Ok(announce) => on_announce(announce, addr),
             Err(e) => log::debug!("bad discovery packet from {addr}: {e}"),
         }

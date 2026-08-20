@@ -2,51 +2,83 @@ package com.phonebridge2.app.discovery
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetSocketAddress
 
-/** Зеркало discovery::Announce на PC-стороне. Поля и имена — 1 в 1. */
+/** UDP discovery is deliberately independent from TLS authentication. */
 @Serializable
 data class Announce(
     val device_id: String,
     val device_name: String,
     val platform: String,
-    val pairing_port: Int
+    val pairing_port: Int,
+    val fingerprint: String,
 )
 
-object DiscoveryClient {
-    const val DISCOVERY_PORT = 17592
+class DiscoveryClient(
+    private val scope: CoroutineScope,
+    private val endpointStore: EndpointStore? = null,
+    private val discoveryPort: Int = 17592,
+) {
     private val json = Json { ignoreUnknownKeys = true }
+    private val _peers = MutableStateFlow<List<DiscoveredPeer>>(emptyList())
+    val peers: StateFlow<List<DiscoveredPeer>> = _peers.asStateFlow()
+    private var job: Job? = null
 
-    /**
-     * Слушает broadcast-объявления от PC в локальной сети. Вызывающая сторона
-     * должна убедиться, что телефон подключён к той же Wi-Fi сети / hotspot ПК —
-     * это не делает discovery сам, см. onboarding-визард (UI).
-     */
-    fun listen(scope: CoroutineScope, onFound: (Announce, String) -> Unit) {
-        scope.launch(Dispatchers.IO) {
-            DatagramSocket(null).use { socket ->
-                socket.reuseAddress = true
-                socket.bind(InetSocketAddress(DISCOVERY_PORT))
-                val buf = ByteArray(1024)
-                while (true) {
-                    val packet = DatagramPacket(buf, buf.size)
-                    socket.receive(packet)
-                    val text = String(packet.data, 0, packet.length, Charsets.UTF_8)
-                    runCatching { json.decodeFromString<Announce>(text) }
-                        .onSuccess { announce ->
-                            onFound(announce, packet.address.hostAddress ?: "")
-                        }
-                        .onFailure {
-                            // Тихо игнорируем мусорные пакеты в сети — это нормально
-                            // для broadcast-based discovery, не логируем как ошибку.
-                        }
-                }
+    fun start() {
+        if (job?.isActive == true) return
+        job = scope.launch(Dispatchers.IO) {
+            while (isActive) {
+                receiveAnnouncements()
+                delay(500)
             }
         }
+    }
+
+    private fun receiveAnnouncements() {
+        DatagramSocket(null).use { socket ->
+            socket.reuseAddress = true
+            socket.bind(InetSocketAddress(discoveryPort))
+            socket.soTimeout = 1000
+            val buf = ByteArray(4096)
+            try {
+                val packet = DatagramPacket(buf, buf.size)
+                socket.receive(packet)
+                val text = String(packet.data, 0, packet.length, Charsets.UTF_8)
+                val announce = runCatching { json.decodeFromString<Announce>(text) }.getOrNull() ?: return
+                val host = packet.address.hostAddress ?: return
+                val peer = DiscoveredPeer(
+                    deviceId = announce.device_id,
+                    deviceName = announce.device_name,
+                    platform = announce.platform,
+                    host = host,
+                    port = announce.pairing_port,
+                    fingerprint = announce.fingerprint.uppercase(),
+                )
+                endpointStore?.save(peer)
+                _peers.value = (_peers.value.filterNot { it.deviceId == peer.deviceId } + peer)
+                    .filterNot { it.isExpired() }
+            } catch (_: java.net.SocketTimeoutException) {
+                _peers.value = _peers.value.filterNot { it.isExpired() }
+            }
+        }
+    }
+
+    fun loadSaved(deviceId: String): DiscoveredPeer? = endpointStore?.load(deviceId)
+
+    fun stop() {
+        job?.cancel()
+        job = null
+        _peers.value = emptyList()
     }
 }
