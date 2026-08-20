@@ -1,5 +1,5 @@
 //! Minimal native-feeling desktop UI shared by Windows/macOS/Linux.
-//! The UI is intentionally small: connection, HFP capability and pairing code.
+//! The UI state is deliberately independent from any concrete window toolkit.
 
 use crate::protocol::HfpSupport;
 use super::UiBackend;
@@ -11,6 +11,8 @@ use tokio::sync::RwLock;
 pub struct UiState {
     pub connected: bool,
     pub peer_name: Option<String>,
+    pub peer_device_id: Option<String>,
+    pub peer_fingerprint: Option<String>,
     pub hfp_support: HfpSupport,
     pub pairing_code: Option<String>,
     pub status: String,
@@ -24,6 +26,21 @@ pub struct BasicUi {
 impl BasicUi {
     pub fn new() -> Self { Self::default() }
     pub fn state(&self) -> Arc<RwLock<UiState>> { self.state.clone() }
+
+    /// Update the pending pairing challenge shown by the desktop frontend.
+    pub async fn show_pairing_challenge(&self, device_id: &str, fingerprint: &str, code: &str) {
+        let mut s = self.state.write().await;
+        s.peer_device_id = Some(device_id.to_owned());
+        s.peer_fingerprint = Some(fingerprint.to_owned());
+        s.pairing_code = Some(code.to_owned());
+        s.status = "Pairing confirmation required".into();
+    }
+
+    /// Clear pairing UI after successful trust or a rejected/closed session.
+    pub async fn clear_pairing(&self) {
+        let mut s = self.state.write().await;
+        s.pairing_code = None;
+    }
 }
 
 #[async_trait]
@@ -40,6 +57,7 @@ impl UiBackend for BasicUi {
         s.connected = connected;
         s.peer_name = peer_name.map(str::to_owned);
         s.status = if connected { "Connected" } else { "Disconnected" }.into();
+        if connected { s.pairing_code = None; }
     }
     async fn update_hfp_status(&self, status: HfpSupport) {
         self.state.write().await.hfp_support = status;
@@ -50,13 +68,11 @@ impl UiBackend for BasicUi {
 mod tests {
     use super::*;
     #[tokio::test]
-    async fn state_updates_without_platform_gui() {
+    async fn pairing_challenge_is_exposed_to_ui_state() {
         let ui = BasicUi::new();
-        ui.update_connection_status(true, Some("Phone")).await;
-        ui.update_hfp_status(HfpSupport::Supported).await;
+        ui.show_pairing_challenge("phone", "fp", "123456").await;
         let s = ui.state().read().await.clone();
-        assert!(s.connected);
-        assert_eq!(s.peer_name.as_deref(), Some("Phone"));
-        assert_eq!(s.hfp_support, HfpSupport::Supported);
+        assert_eq!(s.pairing_code.as_deref(), Some("123456"));
+        assert_eq!(s.peer_device_id.as_deref(), Some("phone"));
     }
 }
