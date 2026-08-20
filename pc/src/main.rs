@@ -45,7 +45,7 @@ async fn main() -> anyhow::Result<()> {
             if let Err(error) = gui.run() { log::error!("desktop GUI exited: {}", error); }
         })?;
 
-    let pairing_server = PairingServer::new(identity.clone(), trust_store.clone())?;
+    let pairing_server = PairingServer::new(identity.clone(), trust_store.clone(), ui_trait.clone())?;
     let pairing_task = tokio::spawn(pairing_server.run());
     let discovery_task = tokio::spawn(discovery::run_broadcaster(identity.clone()));
 
