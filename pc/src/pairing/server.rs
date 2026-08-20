@@ -13,9 +13,12 @@ use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader as TokioBufReader};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
+use tokio::time::{timeout, Duration};
 use tokio_rustls::TlsAcceptor;
 
 pub const PAIRING_PORT: u16 = 17591;
+const HANDSHAKE_READ_TIMEOUT: Duration = Duration::from_secs(15);
+const SESSION_READ_TIMEOUT: Duration = Duration::from_secs(45);
 
 pub struct PairingServer { acceptor: TlsAcceptor, trust_store: Arc<Mutex<TrustStore>>, identity: Arc<Identity> }
 
@@ -41,7 +44,7 @@ async fn handle_connection(stream: tokio::net::TcpStream, acceptor: TlsAcceptor,
     let tls_stream = acceptor.accept(stream).await.context("TLS handshake")?;
     let (reader, mut writer) = tokio::io::split(tls_stream);
     let mut lines = TokioBufReader::new(reader).lines();
-    let hello_line = lines.next_line().await?.context("connection closed before Hello")?;
+    let hello_line = timeout(HANDSHAKE_READ_TIMEOUT, lines.next_line()).await.context("Hello read timeout")??.context("connection closed before Hello")?;
     let hello = Message::from_line(&hello_line)?;
     let (peer_id, peer_name, peer_platform, peer_protocol, peer_fingerprint) = match hello {
         Message::Hello { device_id, device_name, platform, protocol_version, fingerprint } => (device_id, device_name, platform, protocol_version, fingerprint),
@@ -54,7 +57,13 @@ async fn handle_connection(stream: tokio::net::TcpStream, acceptor: TlsAcceptor,
     writer.write_all(Message::HelloAck { device_id: identity.device_id.clone(), device_name: hostname(), protocol_version: PROTOCOL_VERSION, trusted, fingerprint: identity.fingerprint_hex() }.to_line()?.as_bytes()).await?;
     for message in outgoing { writer.write_all(message.to_line()?.as_bytes()).await?; }
 
-    while let Some(line) = lines.next_line().await? {
+    while !session.is_expired() {
+        let line = match timeout(SESSION_READ_TIMEOUT, lines.next_line()).await {
+            Ok(Ok(Some(line))) => line,
+            Ok(Ok(None)) => break,
+            Ok(Err(e)) => return Err(e.into()),
+            Err(_) => anyhow::bail!("control session idle timeout"),
+        };
         let message = Message::from_line(&line)?;
         let is_trusted = { trust_store.lock().await.is_trusted(&peer_id, &peer_fingerprint) };
         let is_pair_confirm = matches!(&message, Message::PairConfirm { .. });
@@ -73,6 +82,8 @@ async fn handle_connection(stream: tokio::net::TcpStream, acceptor: TlsAcceptor,
         }
         if matches!(session.state(), ConnectionState::Connected) { log::debug!("PhoneBridge authenticated session: {peer_id}"); }
     }
+    let _ = writer.write_all(Message::Disconnect { reason: "session closed".into() }.to_line()?.as_bytes()).await;
+    let _ = writer.shutdown().await;
     Ok(())
 }
 
