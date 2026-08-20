@@ -16,32 +16,31 @@ impl ControlSession {
         Self { state: ConnectionState::Handshaking, pairing: PairingSession::new(), calls: None }
     }
 
-    pub fn with_calls(mut self, calls: Arc<SharedState>) -> Self {
-        self.calls = Some(calls);
-        self
-    }
-
+    pub fn with_calls(mut self, calls: Arc<SharedState>) -> Self { self.calls = Some(calls); self }
     pub fn state(&self) -> &ConnectionState { &self.state }
     pub fn pairing(&self) -> &PairingSession { &self.pairing }
 
     pub async fn handle(&mut self, message: Message, trusted: bool) -> Result<Vec<Message>> {
+        self.handle_with_peer(message, trusted, None).await
+    }
+
+    pub async fn handle_with_peer(&mut self, message: Message, trusted: bool, peer_fingerprint: Option<&str>) -> Result<Vec<Message>> {
         let mut outgoing = Vec::new();
         match message {
             Message::Hello { device_id, fingerprint, protocol_version, .. } => {
                 if !matches!(self.state, ConnectionState::Handshaking) { bail!("Hello received after handshake"); }
-                if let Some(challenge) = self.pairing.accept_hello(
-                    device_id, fingerprint.clone(), protocol_version, trusted,
-                    crate::pairing::trust::short_code(&fingerprint),
-                )? { outgoing.push(challenge); }
-                self.state = if trusted || matches!(self.pairing.state(), PairingState::Trusted) {
-                    ConnectionState::Connected
-                } else { ConnectionState::Handshaking };
+                if let Some(challenge) = self.pairing.accept_hello(device_id, fingerprint.clone(), protocol_version, trusted, crate::pairing::trust::short_code(&fingerprint))? { outgoing.push(challenge); }
+                self.state = if trusted || matches!(self.pairing.state(), PairingState::Trusted) { ConnectionState::Connected } else { ConnectionState::Handshaking };
             }
             Message::PairConfirm { device_id, short_code } => {
-                outgoing.push(self.pairing.confirm(&device_id, &short_code)?);
+                let fingerprint = peer_fingerprint.ok_or_else(|| anyhow::anyhow!("peer fingerprint is required for pairing confirmation"))?;
+                outgoing.push(self.pairing.confirm(&device_id, fingerprint, &short_code)?);
                 self.state = ConnectionState::Connected;
             }
-            Message::Ping => outgoing.push(Message::Pong),
+            Message::Ping => {
+                if !matches!(self.state, ConnectionState::Connected) { bail!("Ping before pairing completes"); }
+                outgoing.push(Message::Pong)
+            }
             Message::Pong => {}
             ref message @ (Message::IncomingCall { .. } | Message::CallAnswer | Message::CallDecline | Message::CallEnded | Message::PhoneBluetoothStatus { .. }) => {
                 if !matches!(self.state, ConnectionState::Connected) { bail!("call message before pairing completes"); }
