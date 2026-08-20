@@ -7,6 +7,38 @@ mod basic;
 mod native;
 pub use basic::{BasicUi, UiState};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UiScreen { Dashboard, Pairing, Settings, Diagnostics }
+
+#[derive(Debug, Clone)]
+pub struct DesktopUiState {
+    pub screen: UiScreen,
+    pub connected: bool,
+    pub peer_name: Option<String>,
+    pub peer_address: Option<String>,
+    pub hfp: HfpSupport,
+    pub media_enabled: bool,
+    pub microphone_enabled: bool,
+    pub pairing_code: Option<String>,
+    pub diagnostic_lines: Vec<String>,
+}
+
+impl Default for DesktopUiState {
+    fn default() -> Self {
+        Self {
+            screen: UiScreen::Dashboard,
+            connected: false,
+            peer_name: None,
+            peer_address: None,
+            hfp: HfpSupport::Unknown,
+            media_enabled: true,
+            microphone_enabled: true,
+            pairing_code: None,
+            diagnostic_lines: Vec::new(),
+        }
+    }
+}
+
 #[async_trait]
 pub trait UiBackend: Send + Sync {
     async fn notify_incoming_call(&self, caller_name: Option<&str>, caller_number: Option<&str>);
