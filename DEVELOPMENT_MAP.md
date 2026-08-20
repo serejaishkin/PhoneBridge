@@ -32,7 +32,9 @@ PC Rust Core
   ├── UiBackend
   └── Platform
         ├── Bluetooth stream contract
-        ├── OS Bluetooth backend selector
+        ├── Windows WinRT RFCOMM backend
+        ├── Linux BlueZ backend [planned]
+        ├── macOS IOBluetooth backend [planned]
         └── HfpBackend
              ├── Windows
              ├── macOS
@@ -78,6 +80,7 @@ PC Rust Core
 - PC route persistence primitive.
 - PC multi-route ConnectionCoordinator foundation for TCP routes.
 - PC ConnectionCoordinator can load persisted route preference and persist it only after explicit authenticated-session confirmation.
+- Windows WinRT RFCOMM discovery and StreamSocket connect foundation.
 - PC discovery peer registry with TTL.
 - PC CallController and Android CallManager/CallBridge/InCallService foundation.
 - Dedicated Windows/Linux/macOS HFP backend boundaries.
@@ -102,7 +105,9 @@ PC Rust Core
 - [x] PC RouteStore is available to the live ConnectionCoordinator.
 - [x] Route persistence is exposed only through `mark_authenticated()` on the PC coordinator.
 - [ ] Wire `mark_authenticated()` into the actual authenticated ControlSession owner.
-- [ ] Complete actual direct Bluetooth RFCOMM/L2CAP adapters per OS.
+- [x] Windows WinRT RFCOMM discovery/connect backend foundation.
+- [ ] Adapt WinRT StreamSocket to the common byte-stream/TLS connector.
+- [ ] Complete actual direct Bluetooth RFCOMM/L2CAP adapters for Linux and macOS.
 
 ## P1 — calls / HFP
 - [ ] Decouple `BridgeInCallService` lifecycle from CallBridge; use an application-level call gateway.
@@ -145,11 +150,11 @@ PC Rust Core
 6. Do not merge unfinished experiments into main.
 7. Bluetooth PAN is a network route; direct Bluetooth RFCOMM/L2CAP is a separate transport.
 8. Code comments are written in English; development map is maintained as the handoff source of truth.
-9. Do not mark a native OS backend complete until it actually opens/discovers the required Bluetooth transport.
+9. Do not mark a native OS backend complete until it actually opens/discovers the required Bluetooth transport and is connected to the common byte-stream/TLS layer.
 10. Refresh the current file SHA immediately before every update; never reuse an older blob SHA.
 
 ## Handoff
 Read this map first, then continue from the first unchecked P0 item. Do not run builds/tests until the planned stabilization pass unless explicitly requested.
 
 ## Next coding target
-**Wire `ConnectionCoordinator::mark_authenticated()` into the real PC ControlSession owner, then implement the actual Windows Bluetooth transport, followed by Linux and macOS.**
+**Adapt the Windows WinRT StreamSocket to the common PhoneBridge byte-stream/TLS connector, wire `mark_authenticated()` into the real ControlSession owner, then implement Linux BlueZ and macOS IOBluetooth transports.**
