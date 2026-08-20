@@ -27,6 +27,7 @@ data class Announce(
 
 class DiscoveryClient(
     private val scope: CoroutineScope,
+    private val endpointStore: EndpointStore? = null,
     private val discoveryPort: Int = 17592,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
@@ -37,35 +38,43 @@ class DiscoveryClient(
     fun start() {
         if (job?.isActive == true) return
         job = scope.launch(Dispatchers.IO) {
-            DatagramSocket(null).use { socket ->
-                socket.reuseAddress = true
-                socket.bind(InetSocketAddress(discoveryPort))
-                socket.soTimeout = 1000
-                val buf = ByteArray(4096)
-                while (isActive) {
-                    try {
-                        val packet = DatagramPacket(buf, buf.size)
-                        socket.receive(packet)
-                        val text = String(packet.data, 0, packet.length, Charsets.UTF_8)
-                        val announce = runCatching { json.decodeFromString<Announce>(text) }.getOrNull() ?: continue
-                        val host = packet.address.hostAddress ?: continue
-                        val peer = DiscoveredPeer(
-                            deviceId = announce.device_id,
-                            deviceName = announce.device_name,
-                            platform = announce.platform,
-                            host = host,
-                            port = announce.pairing_port,
-                            fingerprint = announce.fingerprint.uppercase(),
-                        )
-                        _peers.value = (_peers.value.filterNot { it.deviceId == peer.deviceId } + peer)
-                            .filterNot { it.isExpired() }
-                    } catch (_: java.net.SocketTimeoutException) {
-                        _peers.value = _peers.value.filterNot { it.isExpired() }
-                    }
-                }
+            while (isActive) {
+                receiveAnnouncements()
+                delay(500)
             }
         }
     }
+
+    private fun receiveAnnouncements() {
+        DatagramSocket(null).use { socket ->
+            socket.reuseAddress = true
+            socket.bind(InetSocketAddress(discoveryPort))
+            socket.soTimeout = 1000
+            val buf = ByteArray(4096)
+            try {
+                val packet = DatagramPacket(buf, buf.size)
+                socket.receive(packet)
+                val text = String(packet.data, 0, packet.length, Charsets.UTF_8)
+                val announce = runCatching { json.decodeFromString<Announce>(text) }.getOrNull() ?: return
+                val host = packet.address.hostAddress ?: return
+                val peer = DiscoveredPeer(
+                    deviceId = announce.device_id,
+                    deviceName = announce.device_name,
+                    platform = announce.platform,
+                    host = host,
+                    port = announce.pairing_port,
+                    fingerprint = announce.fingerprint.uppercase(),
+                )
+                endpointStore?.save(peer)
+                _peers.value = (_peers.value.filterNot { it.deviceId == peer.deviceId } + peer)
+                    .filterNot { it.isExpired() }
+            } catch (_: java.net.SocketTimeoutException) {
+                _peers.value = _peers.value.filterNot { it.isExpired() }
+            }
+        }
+    }
+
+    fun loadSaved(deviceId: String): DiscoveredPeer? = endpointStore?.load(deviceId)
 
     fun stop() {
         job?.cancel()
