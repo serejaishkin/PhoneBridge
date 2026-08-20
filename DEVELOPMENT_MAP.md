@@ -74,6 +74,7 @@ PC Rust Core
 - Android selected-PC → live ConnectionManager integration.
 - Android pairing wizard state model and Compose confirmation screen.
 - Android main GUI wired to discovered PCs, selected PC persistence and live pairing state.
+- Android explicit Forget paired PC control.
 - Automatic multi-route reconnect coordinator foundation.
 - PC Bluetooth native stream transport contract for RFCOMM/L2CAP.
 - PC per-OS Bluetooth backend selector for Windows/Linux/macOS.
@@ -85,6 +86,7 @@ PC Rust Core
 - Windows native RFCOMM transport module is exposed through the platform layer.
 - Cross-platform Iced desktop GUI with dashboard, pairing wizard and diagnostics views.
 - Desktop GUI launches on its own thread so the Tokio daemon is not blocked.
+- PC pairing server now emits live pairing challenge/result events to the shared UI backend.
 - PC discovery peer registry with TTL.
 - PC CallController and Android CallManager/CallBridge/InCallService foundation.
 - Dedicated Windows/Linux/macOS HFP backend boundaries.
@@ -118,9 +120,11 @@ PC Rust Core
 - [x] PC displays the stable pairing short code in the desktop wizard.
 - [x] Android displays the PC pairing challenge and explicit confirmation action.
 - [x] Android persists trusted PC identity after successful PairResult/HelloAck.
-- [ ] PC GUI should reflect live pairing challenge/result events from ControlSession.
-- [ ] Bind the desktop Pairing wizard actions directly to the live pairing session.
-- [ ] Add explicit "Forget this PC" / "Forget this phone" controls.
+- [x] PC pairing server forwards live challenge/result events to the shared UI state/backend.
+- [ ] Bind the desktop Pairing wizard controls directly to the live pairing session.
+- [x] Android explicit "Forget this PC" control.
+- [ ] PC explicit "Forget this phone" control in the desktop GUI.
+- [ ] Add a PC-side command/API for revoking trust from the GUI.
 
 ## P1 — calls / HFP
 - [ ] Decouple `BridgeInCallService` lifecycle from CallBridge; use an application-level call gateway.
@@ -170,4 +174,4 @@ PC Rust Core
 Read this map first, then continue from the first unchecked P0 item. Do not run builds/tests until the planned stabilization pass unless explicitly requested.
 
 ## Next coding target
-**Wire live ControlSession pairing events into the desktop GUI, add explicit forget/unpair controls on Android and PC, then adapt the Windows WinRT StreamSocket to the common PhoneBridge byte-stream/TLS connector.**
+**Bind the desktop Pairing wizard controls to live pairing state and add PC trust revocation, then adapt the Windows WinRT StreamSocket to the common PhoneBridge byte-stream/TLS connector.**
