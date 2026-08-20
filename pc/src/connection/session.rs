@@ -40,9 +40,16 @@ impl ControlSession {
             Message::PairConfirm { device_id, short_code } => {
                 let fingerprint = peer_fingerprint.ok_or_else(|| anyhow::anyhow!("peer fingerprint is required for pairing confirmation"))?;
                 let result = self.pairing.confirm(&device_id, fingerprint, &short_code)?;
-                let trusted = matches!(&result, Message::PairResult { trusted: true, .. });
-                if trusted { self.state = ConnectionState::Connected; }
+                if matches!(&result, Message::PairResult { trusted: true, .. }) { self.state = ConnectionState::Connected; }
                 outgoing.push(result);
+            }
+            Message::PairApprove { device_id, short_code } => {
+                let result = self.pairing.approve(&device_id, &short_code)?;
+                if matches!(&result, Message::PairResult { trusted: true, .. }) { self.state = ConnectionState::Connected; }
+                outgoing.push(result);
+            }
+            Message::PairReject { device_id, reason } => {
+                outgoing.push(self.pairing.reject(&device_id, &reason)?);
             }
             Message::Ping => { if !self.is_authenticated() { bail!("Ping before pairing completes"); } outgoing.push(Message::Pong); }
             Message::Pong => {}
