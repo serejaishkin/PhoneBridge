@@ -15,7 +15,7 @@ Android
   ├── TLS / FramedChannel
   ├── Pairing / TrustStore
   ├── ConnectionManager / authenticated handshake / heartbeat
-  ├── EndpointStore / PeerConnectionStore / RoutePlanner
+  ├── EndpointStore / PeerConnectionStore / PreferredRouteStore / RoutePlanner
   └── CallManager / InCallService / CallBridge
           │
           ▼
@@ -67,6 +67,7 @@ PC Rust Core
 - Android persistent PC endpoint store.
 - Android selected-PC persistence.
 - Android deterministic Wi-Fi/hotspot/Bluetooth-PAN route planner.
+- Android preferred transport persistence and route prioritization.
 - Automatic multi-route reconnect coordinator.
 - PC Bluetooth native stream transport boundary for RFCOMM/L2CAP implementations.
 - PC discovery peer registry with TTL.
@@ -86,7 +87,7 @@ PC Rust Core
 - [ ] PC-side periodic heartbeat sender.
 - [x] Android can persist the last PC endpoint independently of discovery.
 - [x] Android can persist the selected PC identity.
-- [ ] Persist preferred transport route metadata and prioritize it during reconnect.
+- [x] Persist preferred transport route metadata and prioritize it during reconnect.
 - [ ] Complete direct Bluetooth RFCOMM/L2CAP stream adapters per OS.
 
 ## P1 — calls / HFP
@@ -135,4 +136,4 @@ PC Rust Core
 Read this map first, then continue from the first unchecked P0 item. Do not run builds/tests until the planned stabilization pass unless explicitly requested.
 
 ## Next coding target
-**Wire the saved-PC selection into ConnectionManager, persist preferred transport after a successful connection, then implement native RFCOMM/L2CAP adapters for Windows, Linux and macOS.**
+**Wire the saved-PC selection into ConnectionManager, then implement native RFCOMM/L2CAP adapters for Windows, Linux and macOS.**
