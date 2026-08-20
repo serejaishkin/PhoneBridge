@@ -14,7 +14,7 @@ Android
   ├── DiscoveryClient / PeerRegistry
   ├── TLS / FramedChannel
   ├── Pairing / TrustStore
-  ├── ConnectionManager / authenticated handshake / heartbeat
+  ├── ConnectionManager / authenticated handshake / heartbeat / reconnect
   ├── EndpointStore / PeerConnectionStore / PreferredRouteStore / RoutePlanner
   └── CallManager / InCallService / CallBridge
           │
@@ -70,6 +70,7 @@ PC Rust Core
 - Android selected-PC persistence.
 - Android deterministic Wi-Fi/hotspot/Bluetooth-PAN route planner.
 - Android preferred transport persistence and route prioritization.
+- Android selected-PC → live ConnectionManager integration.
 - Automatic multi-route reconnect coordinator foundation.
 - PC Bluetooth native stream transport contract for RFCOMM/L2CAP.
 - PC per-OS Bluetooth backend selector for Windows/Linux/macOS.
@@ -96,9 +97,10 @@ PC Rust Core
 - [x] Persist preferred transport route metadata and prioritize it during reconnect.
 - [x] PC route model can remember the last successful transport.
 - [x] PC has a route-attempt coordinator for TCP transports.
-- [ ] Connect saved-PC selection directly to live Android ConnectionManager.
+- [x] Connect saved-PC selection directly to live Android ConnectionManager.
 - [ ] Connect PC RouteStore to the live reconnect coordinator.
-- [ ] Save preferred route only after an authenticated session succeeds.
+- [x] Save Android preferred route only after authenticated HelloAck/PairResult.
+- [ ] Save PC preferred route only after an authenticated session succeeds.
 - [ ] Complete actual direct Bluetooth RFCOMM/L2CAP adapters per OS.
 
 ## P1 — calls / HFP
@@ -149,4 +151,4 @@ PC Rust Core
 Read this map first, then continue from the first unchecked P0 item. Do not run builds/tests until the planned stabilization pass unless explicitly requested.
 
 ## Next coding target
-**Connect saved-PC selection and preferred-route persistence to the live Android/PC reconnect coordinators, then implement the actual native Bluetooth transport one OS at a time (Windows → Linux → macOS).**
+**Connect PC RouteStore to the live reconnect coordinator and persist the route only after authenticated ControlSession success; then implement the real Windows Bluetooth transport, followed by Linux and macOS.**
