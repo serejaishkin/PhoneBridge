@@ -7,8 +7,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * Owns the application-level pairing state. TLS already pins the PC identity;
- * this layer provides the human confirmation step and persists the two-way trust.
+ * Owns application-level pairing state. TLS pins the PC identity;
+ * this layer handles the human confirmation step and persists two-way trust.
  */
 class PairingManager(
     context: Context,
@@ -38,11 +38,7 @@ class PairingManager(
         when (message) {
             is Message.HelloAck -> {
                 if (message.data.protocol_version != 1) { _state.value = State.Failed("Unsupported PC protocol version"); return }
-                if (message.data.trusted) {
-                    trustStore.trust(message.data.device_id, message.data.fingerprint)
-                    clearPending()
-                    _state.value = State.Paired(message.data.device_id, message.data.fingerprint)
-                }
+                if (message.data.trusted) trustPc(message.data.device_id, message.data.fingerprint)
             }
             is Message.PairChallenge -> {
                 pendingPcDeviceId = message.data.device_id
@@ -50,15 +46,31 @@ class PairingManager(
                 pendingShortCode = message.data.short_code
                 _state.value = State.WaitingForConfirmation(message.data.device_id, message.data.fingerprint, message.data.short_code)
             }
+            is Message.PairApprove -> {
+                val pendingId = pendingPcDeviceId
+                val pendingCode = pendingShortCode
+                if (pendingId != message.data.device_id || pendingCode != message.data.short_code) {
+                    _state.value = State.Failed("PC pairing approval does not match the pending challenge")
+                    return
+                }
+                val fingerprint = pendingPcFingerprint
+                if (fingerprint == null) _state.value = State.Failed("PC approved pairing without a pending fingerprint")
+                else {
+                    trustPc(message.data.device_id, fingerprint)
+                    connection.send(Message.PairResult(Message.PairResultData(identity.deviceId, true, "Android accepted PC pairing approval")))
+                }
+            }
+            is Message.PairReject -> {
+                if (pendingPcDeviceId == message.data.device_id) {
+                    clearPending()
+                    _state.value = State.Failed(message.data.reason)
+                }
+            }
             is Message.PairResult -> {
                 if (message.data.trusted) {
                     val fingerprint = pendingPcFingerprint
                     if (fingerprint == null) _state.value = State.Failed("Pairing succeeded without a pending PC fingerprint")
-                    else {
-                        trustStore.trust(message.data.device_id, fingerprint)
-                        clearPending()
-                        _state.value = State.Paired(message.data.device_id, fingerprint)
-                    }
+                    else trustPc(message.data.device_id, fingerprint)
                 } else _state.value = State.Failed(message.data.message)
             }
             else -> Unit
@@ -86,6 +98,12 @@ class PairingManager(
             clearPending()
             _state.value = State.Idle
         }
+    }
+
+    private fun trustPc(deviceId: String, fingerprint: String) {
+        trustStore.trust(deviceId, fingerprint)
+        clearPending()
+        _state.value = State.Paired(deviceId, fingerprint)
     }
 
     private fun clearPending() { pendingPcDeviceId = null; pendingPcFingerprint = null; pendingShortCode = null }
