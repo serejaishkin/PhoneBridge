@@ -22,7 +22,7 @@ Android
 PC Rust Core
   ├── Discovery / UDP LAN + hotspot
   ├── PeerRegistry / TTL
-  ├── RouteMemory / preferred transport
+  ├── RouteMemory / RouteStore / ConnectionCoordinator
   ├── TLS control plane
   ├── Protocol
   ├── Identity / TrustStore
@@ -70,10 +70,12 @@ PC Rust Core
 - Android selected-PC persistence.
 - Android deterministic Wi-Fi/hotspot/Bluetooth-PAN route planner.
 - Android preferred transport persistence and route prioritization.
-- Automatic multi-route reconnect coordinator.
+- Automatic multi-route reconnect coordinator foundation.
 - PC Bluetooth native stream transport contract for RFCOMM/L2CAP.
 - PC per-OS Bluetooth backend selector for Windows/Linux/macOS.
 - PC preferred-route memory and route ordering.
+- PC route persistence primitive.
+- PC multi-route ConnectionCoordinator foundation for TCP routes.
 - PC discovery peer registry with TTL.
 - PC CallController and Android CallManager/CallBridge/InCallService foundation.
 - Dedicated Windows/Linux/macOS HFP backend boundaries.
@@ -93,9 +95,11 @@ PC Rust Core
 - [x] Android can persist the selected PC identity.
 - [x] Persist preferred transport route metadata and prioritize it during reconnect.
 - [x] PC route model can remember the last successful transport.
-- [ ] Connect saved-PC selection directly to live ConnectionManager.
+- [x] PC has a route-attempt coordinator for TCP transports.
+- [ ] Connect saved-PC selection directly to live Android ConnectionManager.
+- [ ] Connect PC RouteStore to the live reconnect coordinator.
+- [ ] Save preferred route only after an authenticated session succeeds.
 - [ ] Complete actual direct Bluetooth RFCOMM/L2CAP adapters per OS.
-- [ ] Persist preferred route on the PC across process restarts.
 
 ## P1 — calls / HFP
 - [ ] Decouple `BridgeInCallService` lifecycle from CallBridge; use an application-level call gateway.
@@ -139,9 +143,10 @@ PC Rust Core
 7. Bluetooth PAN is a network route; direct Bluetooth RFCOMM/L2CAP is a separate transport.
 8. Code comments are written in English; development map is maintained as the handoff source of truth.
 9. Do not mark a native OS backend complete until it actually opens/discovers the required Bluetooth transport.
+10. Refresh the current file SHA immediately before every update; never reuse an older blob SHA.
 
 ## Handoff
 Read this map first, then continue from the first unchecked P0 item. Do not run builds/tests until the planned stabilization pass unless explicitly requested.
 
 ## Next coding target
-**Wire saved-PC selection into the live ConnectionManager, persist PC-side preferred route, then implement the actual native Bluetooth transport one OS at a time (Windows → Linux → macOS).**
+**Connect saved-PC selection and preferred-route persistence to the live Android/PC reconnect coordinators, then implement the actual native Bluetooth transport one OS at a time (Windows → Linux → macOS).**
