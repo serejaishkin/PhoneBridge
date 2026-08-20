@@ -1,30 +1,34 @@
-use crate::call::{CallState, SharedState};
+use crate::call::SharedState;
 use crate::connection::state::ConnectionState;
 use crate::pairing::session::{PairingSession, PairingState};
 use crate::protocol::Message;
 use anyhow::{bail, Result};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
+const IDLE_TIMEOUT: Duration = Duration::from_secs(45);
 
 pub struct ControlSession {
     state: ConnectionState,
     pairing: PairingSession,
     calls: Option<Arc<SharedState>>,
+    last_activity: Instant,
 }
 
 impl ControlSession {
-    pub fn new() -> Self {
-        Self { state: ConnectionState::Handshaking, pairing: PairingSession::new(), calls: None }
-    }
-
+    pub fn new() -> Self { Self { state: ConnectionState::Handshaking, pairing: PairingSession::new(), calls: None, last_activity: Instant::now() } }
     pub fn with_calls(mut self, calls: Arc<SharedState>) -> Self { self.calls = Some(calls); self }
     pub fn state(&self) -> &ConnectionState { &self.state }
     pub fn pairing(&self) -> &PairingSession { &self.pairing }
+    pub fn timeout(&self) -> Duration { let limit = if matches!(self.state, ConnectionState::Connected) { IDLE_TIMEOUT } else { HANDSHAKE_TIMEOUT }; limit.saturating_sub(self.last_activity.elapsed()) }
+    pub fn is_expired(&self) -> bool { self.timeout().is_zero() }
 
-    pub async fn handle(&mut self, message: Message, trusted: bool) -> Result<Vec<Message>> {
-        self.handle_with_peer(message, trusted, None).await
-    }
+    pub async fn handle(&mut self, message: Message, trusted: bool) -> Result<Vec<Message>> { self.handle_with_peer(message, trusted, None).await }
 
     pub async fn handle_with_peer(&mut self, message: Message, trusted: bool, peer_fingerprint: Option<&str>) -> Result<Vec<Message>> {
+        if self.is_expired() { bail!("control session timed out"); }
+        self.last_activity = Instant::now();
         let mut outgoing = Vec::new();
         match message {
             Message::Hello { device_id, fingerprint, protocol_version, .. } => {
@@ -37,10 +41,7 @@ impl ControlSession {
                 outgoing.push(self.pairing.confirm(&device_id, fingerprint, &short_code)?);
                 self.state = ConnectionState::Connected;
             }
-            Message::Ping => {
-                if !matches!(self.state, ConnectionState::Connected) { bail!("Ping before pairing completes"); }
-                outgoing.push(Message::Pong)
-            }
+            Message::Ping => { if !matches!(self.state, ConnectionState::Connected) { bail!("Ping before pairing completes"); } outgoing.push(Message::Pong); }
             Message::Pong => {}
             ref message @ (Message::IncomingCall { .. } | Message::CallAnswer | Message::CallDecline | Message::CallEnded | Message::PhoneBluetoothStatus { .. }) => {
                 if !matches!(self.state, ConnectionState::Connected) { bail!("call message before pairing completes"); }
@@ -49,9 +50,7 @@ impl ControlSession {
                     if let Some(response) = controller.handle(message).await.map_err(anyhow::Error::msg)? { outgoing.push(response); }
                 }
             }
-            _ => {
-                if !matches!(self.state, ConnectionState::Connected) { bail!("message is not allowed before pairing completes"); }
-            }
+            _ => { if !matches!(self.state, ConnectionState::Connected) { bail!("message is not allowed before pairing completes"); } }
         }
         Ok(outgoing)
     }
