@@ -6,6 +6,7 @@
 use crate::protocol::HfpSupport;
 
 pub mod bluetooth;
+pub mod bluetooth_native;
 pub use bluetooth::{BluetoothEndpoint, BluetoothSupport, BluetoothTransport, UnsupportedBluetooth};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
