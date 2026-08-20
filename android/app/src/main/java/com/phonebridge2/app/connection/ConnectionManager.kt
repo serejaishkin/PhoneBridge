@@ -1,5 +1,11 @@
 package com.phonebridge2.app.connection
 
+import com.phonebridge2.app.discovery.DiscoveredPeer
+import com.phonebridge2.app.discovery.EndpointStore
+import com.phonebridge2.app.discovery.PeerConnectionStore
+import com.phonebridge2.app.discovery.PreferredRouteStore
+import com.phonebridge2.app.discovery.RoutePlanner
+import com.phonebridge2.app.discovery.TransportKind
 import com.phonebridge2.app.pairing.Message
 import com.phonebridge2.app.pairing.TlsClient
 import kotlinx.coroutines.CoroutineScope
@@ -18,6 +24,9 @@ import kotlinx.coroutines.sync.withLock
 class ConnectionManager(
     private val tlsClient: TlsClient,
     private val scope: CoroutineScope,
+    private val endpointStore: EndpointStore? = null,
+    private val peerStore: PeerConnectionStore? = null,
+    private val routeStore: PreferredRouteStore? = null,
     private val reconnectPolicy: ReconnectPolicy = ReconnectPolicy(),
 ) {
     private val _state = MutableStateFlow(ConnectionState.DISCONNECTED)
@@ -30,59 +39,61 @@ class ConnectionManager(
 
     fun setMessageHandler(handler: suspend (Message) -> Unit) { onMessage = handler }
 
-    fun connect(host: String, port: Int, fingerprint: String, hello: Message.Hello) {
+    /** Connect to a selected peer and keep the last successful route for reconnect. */
+    fun connect(peer: DiscoveredPeer, hello: Message.Hello, manualHost: String? = null) {
         job?.cancel(); heartbeatJob?.cancel(); reconnectPolicy.reset()
+        peerStore?.select(peer.deviceId)
+        endpointStore?.save(peer)
         job = scope.launch(Dispatchers.IO) {
             var firstAttempt = true
             while (isActive) {
                 _state.value = if (firstAttempt) ConnectionState.CONNECTING else ConnectionState.RECONNECTING
                 firstAttempt = false
-                try {
-                    val c = tlsClient.connect(host, port, fingerprint, hello)
-                    connection = c
-                    _state.value = ConnectionState.HANDSHAKING
+                val preferred = routeStore?.load(peer.deviceId)
+                val routes = RoutePlanner.plan(peer, preferred, manualHost)
+                var connected = false
 
-                    // HelloAck is the first authenticated application frame. TLS
-                    // certificate pinning alone is not enough to enter CONNECTED.
-                    val helloAck = tlsClient.readMessage(c)
-                    if (helloAck !is Message.HelloAck) {
-                        throw IllegalStateException("expected HelloAck as first control message")
-                    }
-                    onMessage(helloAck)
-                    if (helloAck.data.protocol_version != 1) {
-                        throw IllegalStateException("unsupported PC protocol version: ${helloAck.data.protocol_version}")
-                    }
-
-                    if (helloAck.data.trusted) {
-                        _state.value = ConnectionState.CONNECTED
-                        reconnectPolicy.reset()
-                        startHeartbeat()
-                    }
-
-                    while (isActive) {
-                        when (val message = tlsClient.readMessage(c)) {
-                            is Message.Ping -> send(Message.Pong)
-                            is Message.Pong -> Unit
-                            is Message.PairResult -> {
-                                onMessage(message)
-                                if (message.data.trusted) {
-                                    _state.value = ConnectionState.CONNECTED
-                                    reconnectPolicy.reset()
-                                    startHeartbeat()
-                                }
-                            }
-                            is Message.Disconnect -> {
-                                _state.value = ConnectionState.DISCONNECTED
-                                break
-                            }
-                            else -> onMessage(message)
-                        }
-                    }
-                } catch (_: Throwable) {
+                for (route in routes) {
                     if (!isActive) break
-                } finally {
-                    heartbeatJob?.cancel(); heartbeatJob = null
-                    connection?.close(); connection = null
+                    try {
+                        val c = tlsClient.connect(route.host, route.port, route.fingerprint, hello)
+                        connection = c
+                        _state.value = ConnectionState.HANDSHAKING
+                        val helloAck = tlsClient.readMessage(c)
+                        if (helloAck !is Message.HelloAck) throw IllegalStateException("expected HelloAck as first control message")
+                        onMessage(helloAck)
+                        if (helloAck.data.protocol_version != 1) throw IllegalStateException("unsupported PC protocol version: ${helloAck.data.protocol_version}")
+                        if (helloAck.data.trusted) {
+                            _state.value = ConnectionState.CONNECTED
+                            routeStore?.save(peer.deviceId, route.kind)
+                            reconnectPolicy.reset()
+                            startHeartbeat()
+                        }
+                        connected = true
+                        while (isActive) {
+                            when (val message = tlsClient.readMessage(c)) {
+                                is Message.Ping -> send(Message.Pong)
+                                is Message.Pong -> Unit
+                                is Message.PairResult -> {
+                                    onMessage(message)
+                                    if (message.data.trusted) {
+                                        _state.value = ConnectionState.CONNECTED
+                                        routeStore?.save(peer.deviceId, route.kind)
+                                        reconnectPolicy.reset()
+                                        startHeartbeat()
+                                    }
+                                }
+                                is Message.Disconnect -> { _state.value = ConnectionState.DISCONNECTED; break }
+                                else -> onMessage(message)
+                            }
+                        }
+                    } catch (_: Throwable) {
+                        connected = false
+                    } finally {
+                        heartbeatJob?.cancel(); heartbeatJob = null
+                        connection?.close(); connection = null
+                    }
+                    if (connected) break
                 }
                 if (!isActive) break
                 delay(reconnectPolicy.nextDelay())
@@ -91,12 +102,18 @@ class ConnectionManager(
         }
     }
 
+    fun connectSelected(hello: Message.Hello, manualHost: String? = null): Boolean {
+        val id = peerStore?.selectedDeviceId() ?: return false
+        val peer = endpointStore?.load(id) ?: return false
+        connect(peer, hello, manualHost)
+        return true
+    }
+
     private fun startHeartbeat() {
         heartbeatJob?.cancel()
         heartbeatJob = scope.launch(Dispatchers.IO) {
             while (isActive) {
                 delay(15_000)
-                if (!isActive) break
                 if (_state.value == ConnectionState.CONNECTED) send(Message.Ping)
             }
         }
@@ -110,8 +127,7 @@ class ConnectionManager(
                     is Message.PairConfirm, is Message.Ping, is Message.Pong -> true
                     else -> _state.value == ConnectionState.CONNECTED
                 }
-                if (!allowed) return@withLock
-                runCatching { tlsClient.sendMessage(c, message) }
+                if (allowed) runCatching { tlsClient.sendMessage(c, message) }
             }
         }
     }
