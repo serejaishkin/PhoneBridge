@@ -11,11 +11,11 @@ PhoneBridge is a local-first Android companion for **Windows, macOS and Linux**.
 ## Architecture
 ```text
 Android
-  ├── Discovery / PeerRegistry
+  ├── DiscoveryClient / PeerRegistry
   ├── TLS / FramedChannel
   ├── Pairing / TrustStore
   ├── ConnectionManager / authenticated handshake / heartbeat
-  ├── EndpointStore / RoutePlanner
+  ├── EndpointStore / PeerConnectionStore / RoutePlanner
   └── CallManager / InCallService / CallBridge
           │
           ▼
@@ -30,7 +30,7 @@ PC Rust Core
   ├── CallController
   ├── UiBackend
   └── Platform
-        ├── Bluetooth transport boundary
+        ├── Bluetooth stream boundary
         └── HfpBackend
              ├── Windows
              ├── macOS
@@ -65,9 +65,10 @@ PC Rust Core
 - PC timeout sends `Disconnect` before socket shutdown.
 - Android discovery peer model/registry.
 - Android persistent PC endpoint store.
+- Android selected-PC persistence.
 - Android deterministic Wi-Fi/hotspot/Bluetooth-PAN route planner.
 - Automatic multi-route reconnect coordinator.
-- PC Bluetooth native transport boundary for RFCOMM/L2CAP implementations.
+- PC Bluetooth native stream transport boundary for RFCOMM/L2CAP implementations.
 - PC discovery peer registry with TTL.
 - PC CallController and Android CallManager/CallBridge/InCallService foundation.
 - Dedicated Windows/Linux/macOS HFP backend boundaries.
@@ -84,8 +85,9 @@ PC Rust Core
 - [x] Keep Android feature writes serialized through ConnectionManager.
 - [ ] PC-side periodic heartbeat sender.
 - [x] Android can persist the last PC endpoint independently of discovery.
-- [ ] Persist selected route metadata and prefer it during reconnect.
-- [ ] Complete direct Bluetooth RFCOMM/L2CAP stream adapter per OS.
+- [x] Android can persist the selected PC identity.
+- [ ] Persist preferred transport route metadata and prioritize it during reconnect.
+- [ ] Complete direct Bluetooth RFCOMM/L2CAP stream adapters per OS.
 
 ## P1 — calls / HFP
 - [ ] Decouple `BridgeInCallService` lifecycle from CallBridge; use an application-level call gateway.
@@ -102,8 +104,9 @@ PC Rust Core
 - [x] UDP discovery usable on a PC-created hotspot when broadcast is permitted by the OS/firewall.
 - [x] Android PeerRegistry model and TTL pruning primitive.
 - [x] PC PeerRegistry model and TTL pruning primitive.
-- [ ] DiscoveryClient → PeerRegistry lifecycle.
-- [ ] Validate announcements.
+- [x] DiscoveryClient persists announced PC endpoints.
+- [ ] Wire DiscoveryClient to a dedicated Android PeerRegistry service.
+- [ ] Validate announcements against expected protocol/schema constraints.
 - [x] Discovered fingerprint carried into TLS pinning.
 - [x] Persist selected PC endpoint.
 - [ ] Advertise direct Bluetooth endpoint when native Bluetooth backend is available.
@@ -126,9 +129,10 @@ PC Rust Core
 5. Keep LAN functionality cloud-independent.
 6. Do not merge unfinished experiments into main.
 7. Bluetooth PAN is a network route; direct Bluetooth RFCOMM/L2CAP is a separate transport.
+8. Code comments are written in English; development map is maintained as the handoff source of truth.
 
 ## Handoff
 Read this map first, then continue from the first unchecked P0 item. Do not run builds/tests until the planned stabilization pass unless explicitly requested.
 
 ## Next coding target
-**Wire Android DiscoveryClient to PeerRegistry and EndpointStore, persist the preferred route, then implement the direct Bluetooth stream adapter per Windows/Linux/macOS.**
+**Wire the saved-PC selection into ConnectionManager, persist preferred transport after a successful connection, then implement native RFCOMM/L2CAP adapters for Windows, Linux and macOS.**
