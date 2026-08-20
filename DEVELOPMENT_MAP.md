@@ -13,9 +13,10 @@ PhoneBridge is a local-first Android companion for **Windows, macOS and Linux**.
 Android
   ├── DiscoveryClient / PeerRegistry
   ├── TLS / FramedChannel
-  ├── Pairing / TrustStore
+  ├── Pairing / TrustStore / PairingManager
   ├── ConnectionManager / authenticated handshake / heartbeat / reconnect
   ├── EndpointStore / PeerConnectionStore / PreferredRouteStore / RoutePlanner
+  ├── PairingScreen / PairingViewModel
   └── CallManager / InCallService / CallBridge
           │
           ▼
@@ -25,11 +26,9 @@ PC Rust Core
   ├── RouteMemory / RouteStore / ConnectionCoordinator
   ├── TLS control plane
   ├── Protocol
-  ├── Identity / TrustStore
-  ├── ConnectionManager / ControlSession
-  ├── PairingSession
+  ├── Identity / TrustStore / PairingSession
   ├── CallController
-  ├── UiBackend
+  ├── Iced Desktop GUI / dashboard / pairing / diagnostics
   └── Platform
         ├── Bluetooth stream contract
         ├── Windows WinRT RFCOMM backend
@@ -73,6 +72,8 @@ PC Rust Core
 - Android deterministic Wi-Fi/hotspot/Bluetooth-PAN route planner.
 - Android preferred transport persistence and route prioritization.
 - Android selected-PC → live ConnectionManager integration.
+- Android pairing wizard state model and Compose confirmation screen.
+- Android main GUI wired to discovered PCs, selected PC persistence and live pairing state.
 - Automatic multi-route reconnect coordinator foundation.
 - PC Bluetooth native stream transport contract for RFCOMM/L2CAP.
 - PC per-OS Bluetooth backend selector for Windows/Linux/macOS.
@@ -82,6 +83,8 @@ PC Rust Core
 - PC ConnectionCoordinator can load persisted route preference and persist it only after explicit authenticated-session confirmation.
 - Windows WinRT RFCOMM discovery and StreamSocket connect foundation.
 - Windows native RFCOMM transport module is exposed through the platform layer.
+- Cross-platform Iced desktop GUI with dashboard, pairing wizard and diagnostics views.
+- Desktop GUI launches on its own thread so the Tokio daemon is not blocked.
 - PC discovery peer registry with TTL.
 - PC CallController and Android CallManager/CallBridge/InCallService foundation.
 - Dedicated Windows/Linux/macOS HFP backend boundaries.
@@ -110,6 +113,14 @@ PC Rust Core
 - [x] Expose Windows RFCOMM backend through the platform module.
 - [ ] Adapt WinRT StreamSocket to the common byte-stream/TLS connector.
 - [ ] Complete actual direct Bluetooth RFCOMM/L2CAP adapters for Linux and macOS.
+
+## Pairing UX
+- [x] PC displays the stable pairing short code in the desktop wizard.
+- [x] Android displays the PC pairing challenge and explicit confirmation action.
+- [x] Android persists trusted PC identity after successful PairResult/HelloAck.
+- [ ] PC GUI should reflect live pairing challenge/result events from ControlSession.
+- [ ] Bind the desktop Pairing wizard actions directly to the live pairing session.
+- [ ] Add explicit "Forget this PC" / "Forget this phone" controls.
 
 ## P1 — calls / HFP
 - [ ] Decouple `BridgeInCallService` lifecycle from CallBridge; use an application-level call gateway.
@@ -159,4 +170,4 @@ PC Rust Core
 Read this map first, then continue from the first unchecked P0 item. Do not run builds/tests until the planned stabilization pass unless explicitly requested.
 
 ## Next coding target
-**Adapt the Windows WinRT StreamSocket to the common PhoneBridge byte-stream/TLS connector, wire `mark_authenticated()` into the real ControlSession owner, then implement Linux BlueZ and macOS IOBluetooth transports.**
+**Wire live ControlSession pairing events into the desktop GUI, add explicit forget/unpair controls on Android and PC, then adapt the Windows WinRT StreamSocket to the common PhoneBridge byte-stream/TLS connector.**
