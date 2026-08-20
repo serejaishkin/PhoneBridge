@@ -1,5 +1,5 @@
 //! Cross-platform desktop dashboard built with iced.
-//! The window is intentionally transport-agnostic: pairing and connection state remain in the core.
+//! Pairing actions are emitted as UI events and are consumed by the core owner.
 
 use iced::widget::{button, column, container, row, scrollable, text, toggler};
 use iced::{Element, Length, Task};
@@ -11,6 +11,9 @@ pub enum Message {
     ShowDiagnostics,
     ToggleMedia(bool),
     ToggleMicrophone(bool),
+    ApprovePairing,
+    RejectPairing,
+    ForgetPhone,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,8 +25,11 @@ pub struct DesktopApp {
     connected: bool,
     peer_name: String,
     peer_address: String,
+    peer_device_id: String,
     hfp: String,
     pairing_code: String,
+    pairing_pending: bool,
+    pairing_status: String,
     media_enabled: bool,
     microphone_enabled: bool,
     diagnostics: Vec<String>,
@@ -36,8 +42,11 @@ impl DesktopApp {
             connected: false,
             peer_name: "No phone paired".into(),
             peer_address: "—".into(),
+            peer_device_id: String::new(),
             hfp: "Checking…".into(),
             pairing_code: pairing_code.into(),
+            pairing_pending: false,
+            pairing_status: "No pending request".into(),
             media_enabled: true,
             microphone_enabled: true,
             diagnostics: Vec::new(),
@@ -48,6 +57,21 @@ impl DesktopApp {
         self.connected = connected;
         if let Some(name) = peer_name { self.peer_name = name.to_owned(); }
         if let Some(address) = address { self.peer_address = address.to_owned(); }
+    }
+
+    /// Populate the live request received from ControlSession.
+    pub fn set_pairing_request(&mut self, device_id: &str, code: &str) {
+        self.peer_device_id = device_id.to_owned();
+        self.pairing_code = code.to_owned();
+        self.pairing_pending = true;
+        self.pairing_status = "Verify the code on the phone, then choose Allow or Reject.".into();
+        self.screen = Screen::Pairing;
+    }
+
+    pub fn set_pairing_result(&mut self, trusted: bool, message: &str) {
+        self.pairing_pending = false;
+        self.pairing_status = message.to_owned();
+        if trusted { self.connected = true; }
     }
 
     pub fn set_hfp(&mut self, status: impl Into<String>) { self.hfp = status.into(); }
@@ -66,6 +90,17 @@ fn update(app: &mut DesktopApp, message: Message) -> Task<Message> {
         Message::ShowDiagnostics => app.screen = Screen::Diagnostics,
         Message::ToggleMedia(value) => app.media_enabled = value,
         Message::ToggleMicrophone(value) => app.microphone_enabled = value,
+        Message::ApprovePairing => {
+            if app.pairing_pending { app.pairing_status = "Allow requested".into(); }
+        }
+        Message::RejectPairing => {
+            if app.pairing_pending { app.pairing_pending = false; app.pairing_status = "Reject requested".into(); }
+        }
+        Message::ForgetPhone => {
+            app.connected = false;
+            app.pairing_pending = false;
+            app.pairing_status = "Phone trust revoked".into();
+        }
     }
     Task::none()
 }
@@ -76,17 +111,8 @@ fn view(app: &DesktopApp) -> Element<'_, Message> {
         button("Pairing").on_press(Message::ShowPairing),
         button("Diagnostics").on_press(Message::ShowDiagnostics),
     ].spacing(8);
-
-    let body = match app.screen {
-        Screen::Dashboard => dashboard(app),
-        Screen::Pairing => pairing(app),
-        Screen::Diagnostics => diagnostics(app),
-    };
-
-    container(column![navigation, body].spacing(18).padding(24))
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+    let body = match app.screen { Screen::Dashboard => dashboard(app), Screen::Pairing => pairing(app), Screen::Diagnostics => diagnostics(app) };
+    container(column![navigation, body].spacing(18).padding(24)).width(Length::Fill).height(Length::Fill).into()
 }
 
 fn dashboard(app: &DesktopApp) -> Element<'_, Message> {
@@ -97,27 +123,26 @@ fn dashboard(app: &DesktopApp) -> Element<'_, Message> {
         text(format!("Phone: {}", app.peer_name)),
         text(format!("Address: {}", app.peer_address)),
         text(format!("Bluetooth HFP: {}", app.hfp)),
-        row![
-            toggler(app.media_enabled).label("Media stream").on_toggle(Message::ToggleMedia),
-            toggler(app.microphone_enabled).label("PC microphone").on_toggle(Message::ToggleMicrophone),
-        ].spacing(24),
+        button("Forget phone").on_press(Message::ForgetPhone),
+        row![toggler(app.media_enabled).label("Media stream").on_toggle(Message::ToggleMedia), toggler(app.microphone_enabled).label("PC microphone").on_toggle(Message::ToggleMicrophone)].spacing(24),
     ].spacing(12).into()
 }
 
 fn pairing(app: &DesktopApp) -> Element<'_, Message> {
+    let actions = if app.pairing_pending {
+        row![button("Allow").on_press(Message::ApprovePairing), button("Reject").on_press(Message::RejectPairing)].spacing(12)
+    } else { row![].spacing(12) };
     column![
         text("Pair Android phone").size(28),
-        text("Connect the phone to the same Wi-Fi network, then select this PC."),
-        text("Verify that both devices show the same code before confirming."),
+        text(format!("Device: {}", if app.peer_device_id.is_empty() { "waiting" } else { &app.peer_device_id })),
+        text("Verify that both devices show the same code."),
         container(text(&app.pairing_code).size(42)).padding(20),
-        text("After confirmation the device identity is trusted and future reconnects can be automatic."),
+        text(&app.pairing_status),
+        actions,
     ].spacing(14).into()
 }
 
 fn diagnostics(app: &DesktopApp) -> Element<'_, Message> {
     let lines = app.diagnostics.iter().fold(column![], |column, line| column.push(text(line)));
-    column![
-        text("Diagnostics").size(28),
-        scrollable(lines).height(Length::Fill),
-    ].spacing(12).into()
+    column![text("Diagnostics").size(28), scrollable(lines).height(Length::Fill)].spacing(12).into()
 }
