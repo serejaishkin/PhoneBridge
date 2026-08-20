@@ -11,7 +11,7 @@ use pairing::server::PairingServer;
 use pairing::trust::TrustStore;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use ui::{BasicUi, UiBackend};
+use ui::{BasicUi, DesktopApp, UiBackend};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -19,7 +19,8 @@ async fn main() -> anyhow::Result<()> {
 
     let identity_dir = pairing::identity::default_identity_dir();
     let identity = Arc::new(Identity::load_or_create(&identity_dir)?);
-    log::info!("device_id={} fingerprint={} short_code={}", identity.device_id, identity.fingerprint_hex(), pairing::trust::short_code(&identity.fingerprint_hex()));
+    let short_code = pairing::trust::short_code(&identity.fingerprint_hex());
+    log::info!("device_id={} fingerprint={} short_code={}", identity.device_id, identity.fingerprint_hex(), short_code);
 
     let trust_store = Arc::new(Mutex::new(TrustStore::load(&identity_dir)?));
     let shared_state = call::SharedState::new();
@@ -32,6 +33,17 @@ async fn main() -> anyhow::Result<()> {
     ui_trait.update_hfp_status(hfp_status).await;
     ui_trait.update_connection_status(false, None).await;
     log::info!("platform={:?}, hfp_support={:?}", platform.kind(), hfp_status);
+
+    // The GUI runs on its own event-loop thread so the Tokio control/audio runtime stays responsive.
+    let gui_code = short_code.clone();
+    std::thread::Builder::new()
+        .name("phonebridge-gui".into())
+        .spawn(move || {
+            let mut gui = DesktopApp::new(gui_code);
+            gui.set_hfp(format!("{:?}", hfp_status));
+            gui.push_diagnostic("PhoneBridge desktop GUI started");
+            if let Err(error) = gui.run() { log::error!("desktop GUI exited: {}", error); }
+        })?;
 
     let pairing_server = PairingServer::new(identity.clone(), trust_store.clone())?;
     let pairing_task = tokio::spawn(pairing_server.run());
