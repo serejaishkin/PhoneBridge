@@ -77,6 +77,7 @@ PC Rust Core
 - PC preferred-route memory and route ordering.
 - PC route persistence primitive.
 - PC multi-route ConnectionCoordinator foundation for TCP routes.
+- PC ConnectionCoordinator can load persisted route preference and persist it only after explicit authenticated-session confirmation.
 - PC discovery peer registry with TTL.
 - PC CallController and Android CallManager/CallBridge/InCallService foundation.
 - Dedicated Windows/Linux/macOS HFP backend boundaries.
@@ -98,9 +99,9 @@ PC Rust Core
 - [x] PC route model can remember the last successful transport.
 - [x] PC has a route-attempt coordinator for TCP transports.
 - [x] Connect saved-PC selection directly to live Android ConnectionManager.
-- [ ] Connect PC RouteStore to the live reconnect coordinator.
-- [x] Save Android preferred route only after authenticated HelloAck/PairResult.
-- [ ] Save PC preferred route only after an authenticated session succeeds.
+- [x] PC RouteStore is available to the live ConnectionCoordinator.
+- [x] Route persistence is exposed only through `mark_authenticated()` on the PC coordinator.
+- [ ] Wire `mark_authenticated()` into the actual authenticated ControlSession owner.
 - [ ] Complete actual direct Bluetooth RFCOMM/L2CAP adapters per OS.
 
 ## P1 — calls / HFP
@@ -151,4 +152,4 @@ PC Rust Core
 Read this map first, then continue from the first unchecked P0 item. Do not run builds/tests until the planned stabilization pass unless explicitly requested.
 
 ## Next coding target
-**Connect PC RouteStore to the live reconnect coordinator and persist the route only after authenticated ControlSession success; then implement the real Windows Bluetooth transport, followed by Linux and macOS.**
+**Wire `ConnectionCoordinator::mark_authenticated()` into the real PC ControlSession owner, then implement the actual Windows Bluetooth transport, followed by Linux and macOS.**
