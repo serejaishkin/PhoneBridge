@@ -1,5 +1,5 @@
-//! Общий control-plane протокол PC <-> Android поверх TLS.
-//! Формат: newline-delimited JSON.
+//! Shared control-plane protocol for PC <-> Android over TLS.
+//! Wire format: newline-delimited JSON.
 
 use serde::{Deserialize, Serialize};
 
@@ -13,6 +13,8 @@ pub enum Message {
     PairRequest { device_id: String, device_name: String, fingerprint: String },
     PairChallenge { device_id: String, fingerprint: String, short_code: String },
     PairConfirm { device_id: String, short_code: String },
+    PairApprove { device_id: String, short_code: String },
+    PairReject { device_id: String, reason: String },
     PairResult { device_id: String, trusted: bool, message: String },
     Ping,
     Pong,
@@ -43,6 +45,13 @@ mod tests {
         let json = serde_json::to_string(&msg).unwrap();
         assert_eq!(json, r#"{"type":"Disconnect","data":{"reason":"peer shutdown"}}"#);
         assert!(matches!(Message::from_line(&json).unwrap(), Message::Disconnect { .. }));
+    }
+    #[test]
+    fn pairing_decisions_are_wire_messages() {
+        let approve = Message::PairApprove { device_id: "phone".into(), short_code: "ABCD-1234".into() };
+        let reject = Message::PairReject { device_id: "phone".into(), reason: "user rejected".into() };
+        assert!(matches!(Message::from_line(&approve.to_line().unwrap()).unwrap(), Message::PairApprove { .. }));
+        assert!(matches!(Message::from_line(&reject.to_line().unwrap()).unwrap(), Message::PairReject { .. }));
     }
     #[test]
     fn empty_messages_have_no_data_field() { assert_eq!(serde_json::to_string(&Message::Ping).unwrap(), r#"{"type":"Ping"}"#); }
