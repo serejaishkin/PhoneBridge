@@ -14,6 +14,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
+/** Owns one authenticated PhoneBridge control connection and its reconnect loop. */
 class ConnectionManager(
     private val tlsClient: TlsClient,
     private val scope: CoroutineScope,
@@ -39,14 +40,37 @@ class ConnectionManager(
                 try {
                     val c = tlsClient.connect(host, port, fingerprint, hello)
                     connection = c
-                    _state.value = ConnectionState.CONNECTED
-                    reconnectPolicy.reset()
-                    startHeartbeat()
+                    _state.value = ConnectionState.HANDSHAKING
+
+                    // HelloAck is the first authenticated application frame. TLS
+                    // certificate pinning alone is not enough to enter CONNECTED.
+                    val helloAck = tlsClient.readMessage(c)
+                    if (helloAck !is Message.HelloAck) {
+                        throw IllegalStateException("expected HelloAck as first control message")
+                    }
+                    onMessage(helloAck)
+                    if (helloAck.data.protocol_version != 1) {
+                        throw IllegalStateException("unsupported PC protocol version: ${helloAck.data.protocol_version}")
+                    }
+
+                    if (helloAck.data.trusted) {
+                        _state.value = ConnectionState.CONNECTED
+                        reconnectPolicy.reset()
+                        startHeartbeat()
+                    }
 
                     while (isActive) {
                         when (val message = tlsClient.readMessage(c)) {
                             is Message.Ping -> send(Message.Pong)
                             is Message.Pong -> Unit
+                            is Message.PairResult -> {
+                                onMessage(message)
+                                if (message.data.trusted) {
+                                    _state.value = ConnectionState.CONNECTED
+                                    reconnectPolicy.reset()
+                                    startHeartbeat()
+                                }
+                            }
                             is Message.Disconnect -> {
                                 _state.value = ConnectionState.DISCONNECTED
                                 break
@@ -73,7 +97,7 @@ class ConnectionManager(
             while (isActive) {
                 delay(15_000)
                 if (!isActive) break
-                send(Message.Ping)
+                if (_state.value == ConnectionState.CONNECTED) send(Message.Ping)
             }
         }
     }
@@ -82,6 +106,11 @@ class ConnectionManager(
         scope.launch(Dispatchers.IO) {
             writeMutex.withLock {
                 val c = connection ?: return@withLock
+                val allowed = when (message) {
+                    is Message.PairConfirm, is Message.Ping, is Message.Pong -> true
+                    else -> _state.value == ConnectionState.CONNECTED
+                }
+                if (!allowed) return@withLock
                 runCatching { tlsClient.sendMessage(c, message) }
             }
         }
