@@ -5,13 +5,11 @@
 
 use crate::protocol::HfpSupport;
 
+pub mod bluetooth;
+pub use bluetooth::{BluetoothEndpoint, BluetoothSupport, BluetoothTransport, UnsupportedBluetooth};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PlatformKind {
-    Windows,
-    MacOS,
-    Linux,
-    Unknown,
-}
+pub enum PlatformKind { Windows, MacOS, Linux, Unknown }
 
 pub trait PlatformBackend: Send + Sync {
     fn kind(&self) -> PlatformKind;
@@ -25,17 +23,13 @@ pub trait PlatformBackend: Send + Sync {
 mod windows;
 #[cfg(target_os = "windows")]
 pub use windows::WindowsBackend as CurrentBackend;
-
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "macos")]
 pub use macos::MacOSBackend as CurrentBackend;
-
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
 pub use linux::LinuxBackend as CurrentBackend;
 
-pub fn current() -> Box<dyn PlatformBackend> {
-    Box::new(CurrentBackend::new())
-}
+pub fn current() -> Box<dyn PlatformBackend> { Box::new(CurrentBackend::new()) }
