@@ -4,8 +4,12 @@ use crate::protocol::HfpSupport;
 use async_trait::async_trait;
 
 mod basic;
+mod dashboard;
+mod desktop;
 mod native;
 pub use basic::{BasicUi, UiState};
+pub use dashboard::Dashboard;
+pub use desktop::DesktopApp;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UiScreen { Dashboard, Pairing, Settings, Diagnostics }
