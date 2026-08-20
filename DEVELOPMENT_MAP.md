@@ -81,6 +81,7 @@ PC Rust Core
 - PC multi-route ConnectionCoordinator foundation for TCP routes.
 - PC ConnectionCoordinator can load persisted route preference and persist it only after explicit authenticated-session confirmation.
 - Windows WinRT RFCOMM discovery and StreamSocket connect foundation.
+- Windows native RFCOMM transport module is exposed through the platform layer.
 - PC discovery peer registry with TTL.
 - PC CallController and Android CallManager/CallBridge/InCallService foundation.
 - Dedicated Windows/Linux/macOS HFP backend boundaries.
@@ -106,6 +107,7 @@ PC Rust Core
 - [x] Route persistence is exposed only through `mark_authenticated()` on the PC coordinator.
 - [ ] Wire `mark_authenticated()` into the actual authenticated ControlSession owner.
 - [x] Windows WinRT RFCOMM discovery/connect backend foundation.
+- [x] Expose Windows RFCOMM backend through the platform module.
 - [ ] Adapt WinRT StreamSocket to the common byte-stream/TLS connector.
 - [ ] Complete actual direct Bluetooth RFCOMM/L2CAP adapters for Linux and macOS.
 
