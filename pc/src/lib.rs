@@ -5,3 +5,5 @@ pub mod shairport;
 pub mod ui;
 pub mod config;
 pub mod discovery;
+pub mod connection;
+pub mod platform;
