@@ -15,7 +15,7 @@ Android
   ├── Discovery / PeerRegistry
   ├── TLS / FramedChannel
   ├── Pairing / TrustStore
-  ├── ConnectionManager / heartbeat
+  ├── ConnectionManager / authenticated handshake / heartbeat
   └── CallManager / InCallService / CallBridge
           │
           ▼
@@ -41,19 +41,22 @@ PC Rust Core
 - LAN discovery never authenticates a device.
 - `Ping` / `Pong` heartbeat frames.
 - `Disconnect { reason }` graceful close frame.
+- Android does not enter `CONNECTED` until a trusted `HelloAck` or successful `PairResult` is received.
 
 ## Completed
 - PC TLS server and Android TLS client foundations.
 - Canonical newline-delimited framing on Rust/Android.
 - Persistent identity and TrustStore foundations.
 - Fingerprint-bound pairing state machine.
-- Trusted-device fast path at PC session layer.
-- Pre-authentication command rejection.
+- Trusted-device fast path at PC and Android session layers.
+- Android first-frame `HelloAck` validation.
+- Android pre-authentication command gating.
+- Pre-authentication command rejection on PC.
 - Transport handshake timeout and idle timeout.
 - Android reconnecting ConnectionManager with serialized writes.
 - Android heartbeat every 15 seconds while connected.
 - Android automatic `Pong` response.
-- Android graceful `Disconnect` handling and reconnect suppression for that connection.
+- Android graceful `Disconnect` handling.
 - PC graceful `Disconnect` handling.
 - PC timeout sends `Disconnect` before socket shutdown.
 - Android discovery peer model/registry.
@@ -62,12 +65,13 @@ PC Rust Core
 
 ## P0 — connection foundation
 - [ ] Move `HelloAck` construction completely into ControlSession.
-- [ ] Complete trusted-device fast path on Android.
+- [x] Complete trusted-device fast path on Android.
 - [x] Reject stale/mismatched pairing state.
 - [x] Enforce transport timeouts in session and TCP loop.
 - [x] Connected transition depends on successful pairing/trust at PC session layer.
+- [x] Android Connected transition depends on authenticated HelloAck/PairResult.
 - [x] Graceful disconnect frame and peer-close handling.
-- [ ] Android persistent trust data integration.
+- [x] Android persistent trust data integration in PairingManager.
 - [x] Keep Android feature writes serialized through ConnectionManager.
 - [ ] PC-side periodic heartbeat sender (Android already sends heartbeat).
 
@@ -110,4 +114,4 @@ PC Rust Core
 Read this map first, then continue from the first unchecked P0 item. Do not run builds/tests until the planned stabilization pass unless explicitly requested.
 
 ## Next coding target
-**Finish Android trusted-device persistence/fast path, wire PC HFP capability into authenticated sessions, then start real Windows HFP implementation.**
+**Move HelloAck construction into ControlSession, add the PC heartbeat sender, then wire authenticated PC Bluetooth capability reporting and begin real Windows HFP implementation.**
