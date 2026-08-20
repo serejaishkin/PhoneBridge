@@ -24,6 +24,16 @@ time = "=0.3.36"
 # Cross-platform desktop UI. Platform-specific integration stays behind UiBackend.
 iced = { version = "0.13", default-features = false, features = ["tokio", "wgpu"] }
 
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Foundation",
+    "Foundation_Collections",
+    "Devices_Bluetooth",
+    "Devices_Bluetooth_Rfcomm",
+    "Networking",
+    "Storage_Streams",
+] }
+
 [[bin]]
 name = "phonebridge2"
 path = "src/main.rs"
