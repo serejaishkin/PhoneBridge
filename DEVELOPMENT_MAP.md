@@ -59,14 +59,17 @@ PC Rust Core
 - Windows HFP backend boundary isolated from core.
 - Linux BlueZ HFP backend boundary isolated from core.
 - macOS IOBluetooth HFP backend boundary isolated from core.
+- Pairing confirmation is now bound to both device ID and persistent fingerprint.
+- Pairing server passes the peer fingerprint into confirmation validation.
+- Ping is rejected until the session is authenticated.
 
 ## P0 — connection foundation
 
 - [ ] Move `HelloAck` construction into ControlSession.
 - [ ] Complete trusted-device fast path on both sides.
-- [ ] Reject stale/mismatched pairing state.
+- [x] Reject stale/mismatched pairing state at the pairing-session level.
 - [ ] Enforce transport timeouts.
-- [ ] Make Connected transition depend strictly on authentication/trust.
+- [x] Make Connected transition depend on successful pairing/trust at the PC session layer.
 - [ ] Graceful disconnect semantics.
 - [ ] Android persistent trust data.
 - [ ] Keep all writes serialized through ConnectionManager.
@@ -117,4 +120,4 @@ Read this map first, then continue from the first unchecked P0 item. Do not run 
 
 ## Next coding target
 
-**Finish connection trust semantics, then replace the current HFP stubs with real Windows, Linux and macOS platform integrations.**
+**Finish HelloAck/trusted-device semantics and transport timeouts, then start real Windows HFP implementation.**
