@@ -62,16 +62,10 @@ async fn handle_connection(stream: tokio::net::TcpStream, acceptor: TlsAcceptor,
             Ok(Ok(Some(line))) => line,
             Ok(Ok(None)) => break,
             Ok(Err(e)) => return Err(e.into()),
-            Err(_) => {
-                let _ = writer.write_all(Message::Disconnect { reason: "idle timeout".into() }.to_line()?.as_bytes()).await;
-                break;
-            }
+            Err(_) => { let _ = writer.write_all(Message::Disconnect { reason: "idle timeout".into() }.to_line()?.as_bytes()).await; break; }
         };
         let message = Message::from_line(&line)?;
-        if let Message::Disconnect { reason } = &message {
-            log::debug!("peer {peer_id} requested disconnect: {reason}");
-            break;
-        }
+        if let Message::Disconnect { reason } = &message { log::debug!("peer {peer_id} requested disconnect: {reason}"); break; }
         let is_trusted = { trust_store.lock().await.is_trusted(&peer_id, &peer_fingerprint) };
         let is_pair_confirm = matches!(&message, Message::PairConfirm { .. });
         match session.handle_with_peer(message, is_trusted, Some(&peer_fingerprint)).await {
