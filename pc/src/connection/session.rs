@@ -38,11 +38,14 @@ impl ControlSession {
             }
             Message::PairConfirm { device_id, short_code } => {
                 let fingerprint = peer_fingerprint.ok_or_else(|| anyhow::anyhow!("peer fingerprint is required for pairing confirmation"))?;
-                outgoing.push(self.pairing.confirm(&device_id, fingerprint, &short_code)?);
-                self.state = ConnectionState::Connected;
+                let result = self.pairing.confirm(&device_id, fingerprint, &short_code)?;
+                let trusted = matches!(&result, Message::PairResult { trusted: true, .. });
+                if trusted { self.state = ConnectionState::Connected; }
+                outgoing.push(result);
             }
             Message::Ping => { if !matches!(self.state, ConnectionState::Connected) { bail!("Ping before pairing completes"); } outgoing.push(Message::Pong); }
             Message::Pong => {}
+            Message::Disconnect { .. } => {}
             ref message @ (Message::IncomingCall { .. } | Message::CallAnswer | Message::CallDecline | Message::CallEnded | Message::PhoneBluetoothStatus { .. }) => {
                 if !matches!(self.state, ConnectionState::Connected) { bail!("call message before pairing completes"); }
                 if let Some(calls) = &self.calls {
