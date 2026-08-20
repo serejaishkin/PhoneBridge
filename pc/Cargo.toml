@@ -21,6 +21,9 @@ async-trait = "0.1"
 zeroize = "=1.7.0"
 time = "=0.3.36"
 
+# Cross-platform desktop UI. Platform-specific integration stays behind UiBackend.
+iced = { version = "0.13", default-features = false, features = ["tokio", "wgpu"] }
+
 [[bin]]
 name = "phonebridge2"
 path = "src/main.rs"
