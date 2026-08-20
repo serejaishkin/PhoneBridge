@@ -3,7 +3,6 @@
 Last updated: 2026-08-20
 
 ## Goal
-
 PhoneBridge is a local-first Android companion for **Windows, macOS and Linux**. The PC core remains platform-neutral; OS-specific integrations live behind platform interfaces.
 
 ## Current branch
@@ -16,21 +15,25 @@ Android
   ├── TLS / FramedChannel
   ├── Pairing / TrustStore
   ├── ConnectionManager / authenticated handshake / heartbeat
+  ├── ConnectionRoute / AutoReconnect
   └── CallManager / InCallService / CallBridge
           │
           ▼
 PC Rust Core
-  ├── Discovery
+  ├── Discovery / UDP LAN + hotspot
   ├── TLS control plane
   ├── Protocol
   ├── Identity / TrustStore
   ├── ConnectionManager / ControlSession
   ├── PairingSession
   ├── CallController
-  └── HfpBackend
-        ├── Windows
-        ├── macOS
-        └── Linux
+  ├── UiBackend
+  └── Platform
+        ├── Bluetooth transport boundary
+        └── HfpBackend
+             ├── Windows
+             ├── macOS
+             └── Linux
 ```
 
 ## Protocol v1
@@ -60,6 +63,9 @@ PC Rust Core
 - PC graceful `Disconnect` handling.
 - PC timeout sends `Disconnect` before socket shutdown.
 - Android discovery peer model/registry.
+- Ordered Android Wi-Fi/hotspot/Bluetooth-PAN route model.
+- Automatic multi-route reconnect coordinator.
+- PC Bluetooth native transport boundary for RFCOMM/L2CAP implementations.
 - PC CallController and Android CallManager/CallBridge/InCallService foundation.
 - Dedicated Windows/Linux/macOS HFP backend boundaries.
 
@@ -73,7 +79,9 @@ PC Rust Core
 - [x] Graceful disconnect frame and peer-close handling.
 - [x] Android persistent trust data integration in PairingManager.
 - [x] Keep Android feature writes serialized through ConnectionManager.
-- [ ] PC-side periodic heartbeat sender (Android already sends heartbeat).
+- [ ] PC-side periodic heartbeat sender.
+- [ ] Persist selected PC route and retry it before discovery.
+- [ ] Complete direct Bluetooth RFCOMM/L2CAP stream adapter per OS.
 
 ## P1 — calls / HFP
 - [ ] Decouple `BridgeInCallService` lifecycle from CallBridge; use an application-level call gateway.
@@ -86,11 +94,14 @@ PC Rust Core
 - [ ] Audio routing diagnostics and restoration.
 
 ## P1 — discovery
+- [x] UDP discovery on normal Wi-Fi/LAN.
+- [x] UDP discovery usable on a PC-created hotspot when broadcast is permitted by the OS/firewall.
 - [ ] DiscoveryClient → PeerRegistry lifecycle.
 - [ ] Periodic TTL pruning.
 - [ ] Validate announcements.
-- [ ] Use discovered fingerprint for TLS pinning.
+- [x] Discovered fingerprint carried into TLS pinning.
 - [ ] Persist selected PC.
+- [ ] Advertise direct Bluetooth endpoint when native Bluetooth backend is available.
 
 ## P1 — media
 - [ ] Play/pause, next/previous, volume, metadata.
@@ -109,9 +120,10 @@ PC Rust Core
 4. Prefer additive protocol changes.
 5. Keep LAN functionality cloud-independent.
 6. Do not merge unfinished experiments into main.
+7. Bluetooth PAN is a network route; direct Bluetooth RFCOMM/L2CAP is a separate transport.
 
 ## Handoff
 Read this map first, then continue from the first unchecked P0 item. Do not run builds/tests until the planned stabilization pass unless explicitly requested.
 
 ## Next coding target
-**Move HelloAck construction into ControlSession, add the PC heartbeat sender, then wire authenticated PC Bluetooth capability reporting and begin real Windows HFP implementation.**
+**Persist selected PC routes, finish Android discovery→connect lifecycle, then implement the direct Bluetooth stream adapter per Windows/Linux/macOS.**
