@@ -12,11 +12,11 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig;
 use std::io::BufReader;
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader as TokioBufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader as TokioBufReader};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tokio::time::{sleep, timeout, Duration, Instant};
-use tokio_rustls::TlsAcceptor;
+use tokio_rustls::{server::TlsStream, TlsAcceptor};
 
 pub const PAIRING_PORT: u16 = 17591;
 const HANDSHAKE_READ_TIMEOUT: Duration = Duration::from_secs(15);
@@ -38,7 +38,7 @@ impl PairingServer {
         Ok(Self { acceptor: TlsAcceptor::from(Arc::new(config)), trust_store, identity, ui, command_hub: PairingCommandHub::new() })
     }
 
-    /// Returns the command endpoint used by the desktop GUI to control live pairing sessions.
+    /// Returns the command endpoint used by desktop UI to control live pairing sessions.
     pub fn command_hub(&self) -> PairingCommandHub { self.command_hub.clone() }
 
     pub async fn run(self) -> Result<()> {
@@ -52,23 +52,28 @@ impl PairingServer {
             let ui = self.ui.clone();
             let command_hub = self.command_hub.clone();
             tokio::spawn(async move {
-                if let Err(e) = handle_connection(stream, acceptor, trust_store, identity, ui, command_hub).await {
-                    log::warn!("connection from {peer_addr} ended with error: {e}");
-                }
+                let result = async {
+                    let tls_stream = acceptor.accept(stream).await.context("TLS handshake")?;
+                    serve_tls_stream(tls_stream, trust_store, identity, ui, command_hub).await
+                }.await;
+                if let Err(e) = result { log::warn!("connection from {peer_addr} ended with error: {e}"); }
             });
         }
     }
 }
 
-async fn handle_connection(
-    stream: tokio::net::TcpStream,
-    acceptor: TlsAcceptor,
+/// Common authenticated session entry point for every TLS transport.
+/// Bluetooth RFCOMM can call this with its own AsyncRead/AsyncWrite stream.
+pub async fn serve_tls_stream<S>(
+    tls_stream: TlsStream<S>,
     trust_store: Arc<Mutex<TrustStore>>,
     identity: Arc<Identity>,
     ui: Arc<dyn UiBackend>,
     command_hub: PairingCommandHub,
-) -> Result<()> {
-    let tls_stream = acceptor.accept(stream).await.context("TLS handshake")?;
+) -> Result<()>
+where
+    S: tokio::io::AsyncRead + AsyncWrite + Unpin,
+{
     let (reader, mut writer) = tokio::io::split(tls_stream);
     let mut lines = TokioBufReader::new(reader).lines();
     let hello_line = timeout(HANDSHAKE_READ_TIMEOUT, lines.next_line()).await.context("Hello read timeout")??.context("connection closed before Hello")?;
@@ -102,11 +107,7 @@ async fn handle_connection(
     while !session.is_expired() {
         tokio::select! {
             line = lines.next_line() => {
-                let line = match line {
-                    Ok(Some(line)) => line,
-                    Ok(None) => break,
-                    Err(e) => return Err(e.into()),
-                };
+                let line = match line { Ok(Some(line)) => line, Ok(None) => break, Err(e) => return Err(e.into()) };
                 deadline.as_mut().reset(Instant::now() + SESSION_READ_TIMEOUT);
                 let message = Message::from_line(&line)?;
                 if let Message::Disconnect { reason } = &message { log::debug!("peer {peer_id} requested disconnect: {reason}"); break; }
@@ -125,7 +126,7 @@ async fn handle_connection(
                                 writer.write_all(response.to_line()?.as_bytes()).await?;
                                 ui.update_connection_status(true, Some(&peer_name)).await;
                             }
-                            Err(e) => { ui.update_pairing_result(false, &e.to_string()).await; }
+                            Err(e) => ui.update_pairing_result(false, &e.to_string()).await,
                         }
                     }
                     PairingUiCommand::Reject { device_id, reason } => {
@@ -161,7 +162,7 @@ async fn handle_connection(
     Ok(())
 }
 
-async fn process_protocol_message(
+async fn process_protocol_message<W>(
     session: &mut ControlSession,
     message: Message,
     peer_id: &str,
@@ -169,8 +170,11 @@ async fn process_protocol_message(
     peer_name: &str,
     trust_store: &Arc<Mutex<TrustStore>>,
     ui: &Arc<dyn UiBackend>,
-    writer: &mut tokio::io::WriteHalf<tokio_rustls::server::TlsStream<tokio::net::TcpStream>>,
-) -> Result<()> {
+    writer: &mut W,
+) -> Result<()>
+where
+    W: AsyncWrite + Unpin,
+{
     let is_trusted = { trust_store.lock().await.is_trusted(peer_id, peer_fingerprint) };
     let is_pair_confirm = matches!(&message, Message::PairConfirm { .. });
     match session.handle_with_peer(message, is_trusted, Some(peer_fingerprint)).await {
