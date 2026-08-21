@@ -25,7 +25,7 @@ PhoneBridge repository
 │   └── frozen experimental custom transport/session stack
 │
 └── feature/kdeconnect-core
-    └── planned migration/integration branch
+    └── active migration/integration branch
 ```
 
 The old custom TLS/pairing implementation is retained for history and reference. Do not continue adding parallel protocol features there unless required to preserve compatibility during migration.
@@ -64,6 +64,8 @@ Use as the primary reference/base for:
 - plugin/feature architecture;
 - existing Linux/Windows/macOS desktop foundation;
 - Android protocol implementation where appropriate.
+
+The current KDE Connect protocol reference documents `kdeconnect.identity` and `kdeconnect.pair`; protocol version 8 is current in that reference. Pairing is explicit and devices must be paired before normal packets are accepted. The PhoneBridge compatibility layer follows this model. 
 
 ### Sefirah
 Use as a feature/UX reference and, where legally appropriate, as source for selected GPL components:
@@ -105,16 +107,22 @@ Reuse only where it provides functionality not already better supplied by the se
 - [x] Compare PhoneBridge with KDE Connect and Sefirah at architecture level.
 
 ### Phase 1 — KDE Connect integration map
+- [x] Create migration branch `feature/kdeconnect-core`.
+- [x] Add a small KDE Connect-compatible packet layer for `identity` and `pair`.
+- [x] Add a UI-independent pairing state machine with explicit Allow/Reject decisions.
+- [x] Add an interactive desktop pairing playground to make the new pairing flow tangible before network integration.
+- [x] Keep the pairing playground isolated from the production daemon.
 - [ ] Pin exact KDE Connect Android/desktop versions or commits to use as reference/base.
 - [ ] Map PhoneBridge files to KDE Connect equivalents.
 - [ ] Identify code that can be reused directly.
 - [ ] Identify code that must be rewritten/adapted.
 - [ ] Identify code that should be removed after migration.
 - [ ] Create third-party attribution inventory.
-- [ ] Create migration branch `feature/kdeconnect-core`.
 
 ### Phase 2 — protocol/device foundation
-- [ ] Establish KDE Connect-compatible device/protocol layer.
+- [x] Establish initial KDE Connect-compatible packet model.
+- [x] Establish initial KDE Connect-compatible pairing state model.
+- [ ] Replace the old PhoneBridge Hello/HelloAck pairing protocol with the KDE Connect-compatible path.
 - [ ] Establish Android ↔ desktop pairing using the selected base.
 - [ ] Establish discovery using the selected base.
 - [ ] Establish reconnect using the selected base.
@@ -155,6 +163,24 @@ A PC hotspot remains an IP network path. It must not introduce a second applicat
 - [ ] Clipboard.
 - [ ] Files.
 
+## Current pairing playground
+Run from `pc/` after dependencies are installed:
+
+```text
+cargo run --bin phonebridge-pairing-demo
+```
+
+The demo currently provides:
+- simulated Android identity packet;
+- visible pairing state;
+- remote device details;
+- Allow button;
+- Reject button;
+- displayed `kdeconnect.pair` response packet;
+- no network/TLS side effects.
+
+This is a **UX/protocol smoke playground**, not yet a real phone connection test.
+
 ## Frozen custom stack
 The previous implementation contains:
 - Identity;
@@ -183,4 +209,4 @@ Before deleting or replacing old components:
 ## Handoff
 Read this file first before continuing development.
 
-**Immediate next task:** create the KDE Connect migration branch and produce a file-by-file reuse/replace/remove map. Do not start another custom pairing implementation.
+**Immediate next task:** wire the KDE Connect-compatible pairing model into the real PC TLS connection and then add the matching Android packet/session implementation. Keep the desktop demo available until real pairing works.
