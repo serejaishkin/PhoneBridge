@@ -12,4 +12,4 @@ pub mod tls_server;
 pub use packet::{IdentityPacket, PairPacket, Packet};
 pub use pairing::{PairingDecision, PairingEvent, PairingSession, PairingState};
 pub use tls::{certificate_fingerprint, default_security_dir, LocalTlsIdentity, TrustStore, TrustedPeer};
-pub use tls_server::{TlsPairingServer, TLS_PAIRING_PORT};
+pub use tls_server::{IncomingPairing, PairingResponder, TlsPairingServer, TLS_PAIRING_PORT};
