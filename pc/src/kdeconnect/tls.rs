@@ -31,7 +31,7 @@ impl LocalTlsIdentity {
             let subject = hostname();
             let generated = generate_simple_self_signed(vec![subject])?;
             let cert = generated.cert.der().to_vec();
-            let key = generated.signing_key.serialize_der();
+            let key = generated.key_pair.serialize_der();
             write_private_file(&cert_path, &cert)?;
             write_private_file(&key_path, &key)?;
             (cert, key)
