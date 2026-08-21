@@ -38,7 +38,6 @@ impl PairingServer {
         Ok(Self { acceptor: TlsAcceptor::from(Arc::new(config)), trust_store, identity, ui, command_hub: PairingCommandHub::new() })
     }
 
-    /// Returns the command endpoint used by desktop UI to control live pairing sessions.
     pub fn command_hub(&self) -> PairingCommandHub { self.command_hub.clone() }
 
     pub async fn run(self) -> Result<()> {
@@ -63,7 +62,6 @@ impl PairingServer {
 }
 
 /// Common authenticated session entry point for every TLS transport.
-/// Bluetooth RFCOMM can call this with its own AsyncRead/AsyncWrite stream.
 pub async fn serve_tls_stream<S>(
     tls_stream: TlsStream<S>,
     trust_store: Arc<Mutex<TrustStore>>,
@@ -121,10 +119,12 @@ where
                         if device_id != peer_id { continue; }
                         match session.pairing_mut().approve(&device_id, &short_code) {
                             Ok(response) => {
-                                trust_store.lock().await.trust(&peer_id, &peer_fingerprint)?;
+                                if matches!(&response, Message::PairResult { trusted: true, .. }) {
+                                    trust_store.lock().await.trust(&peer_id, &peer_fingerprint)?;
+                                    ui.update_connection_status(true, Some(&peer_name)).await;
+                                }
                                 ui.update_pairing_result(true, "PC approved pairing").await;
                                 writer.write_all(response.to_line()?.as_bytes()).await?;
-                                ui.update_connection_status(true, Some(&peer_name)).await;
                             }
                             Err(e) => ui.update_pairing_result(false, &e.to_string()).await,
                         }
