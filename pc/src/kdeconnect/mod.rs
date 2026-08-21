@@ -1,12 +1,13 @@
 //! KDE Connect compatibility layer.
 //!
-//! This module intentionally starts small: it models the core identity/pairing
-//! packets and keeps pairing state independent from the desktop UI. The next
-//! migration step can replace the old PhoneBridge pairing protocol without
-//! forcing the GUI to know anything about sockets or TLS.
+//! This module models protocol primitives independently from the desktop UI.
+//! TLS identity/trust is kept here so transports can share the same security
+//! boundary without recreating pairing state.
 
 pub mod packet;
 pub mod pairing;
+pub mod tls;
 
 pub use packet::{IdentityPacket, PairPacket, Packet};
 pub use pairing::{PairingDecision, PairingEvent, PairingSession, PairingState};
+pub use tls::{certificate_fingerprint, default_security_dir, LocalTlsIdentity, TrustStore, TrustedPeer};
