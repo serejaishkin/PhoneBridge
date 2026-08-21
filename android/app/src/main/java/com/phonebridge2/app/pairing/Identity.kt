@@ -10,7 +10,6 @@ import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.Date
 import javax.security.auth.x500.X500Principal
-import org.bouncycastle.cert.X509v3CertificateBuilder
 import org.bouncycastle.cert.jcajce.JcaContentSignerBuilder
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
@@ -57,8 +56,7 @@ class Identity private constructor(
             val subject = X500Principal("CN=$deviceId")
 
             // JcaX509v3CertificateBuilder принимает java.security.PublicKey
-            // напрямую и сам корректно строит SubjectPublicKeyInfo. Это также
-            // избегает несовместимости Kotlin с overloaded BC-конструктором.
+            // напрямую и сам корректно строит SubjectPublicKeyInfo.
             val certBuilder = JcaX509v3CertificateBuilder(
                 subject,
                 serial,
