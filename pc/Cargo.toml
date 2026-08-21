@@ -22,6 +22,11 @@ async-trait = "0.1"
 zeroize = "=1.7.0"
 time = "=0.3.36"
 eframe = "0.31"
+cpal = "0.15"
+opus = "0.3"
+crossbeam-channel = "0.5"
+parking_lot = "0.12"
+tokio-tungstenite = "0.23"
 
 [[bin]]
 name = "phonebridge2"
