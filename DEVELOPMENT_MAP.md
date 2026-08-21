@@ -8,6 +8,9 @@ PhoneBridge is a local-first Android companion for **Windows, macOS and Linux**.
 ## Current branch
 `feature/tls-pairing-v1`
 
+## Stabilization status
+The repository is currently in a compile/API stabilization pass. Static inspection found a Windows RFCOMM bridge mismatch where the bridge called the shared TLS acceptor with `Identity` even though the TLS boundary accepts DER certificate/key bytes. This was corrected to use `Identity.cert_der` and parse `Identity.key_pem` through `rustls_pemfile`. No build or test result is claimed until an actual runner executes them.
+
 ## Architecture
 ```text
 Android
@@ -106,6 +109,7 @@ PC Rust Core
 - `ConnectionManager` accepts any TLS stream over the common Tokio AsyncRead/AsyncWrite boundary.
 - PC authenticated session entry point is transport-generic: `serve_tls_stream()` accepts any Tokio AsyncRead/AsyncWrite TLS stream.
 - Windows incoming RFCOMM listener bridge converts accepted sockets to the common byte stream, performs TLS handshake and enters the shared `serve_tls_stream()` pairing/session path.
+- Windows RFCOMM bridge uses the shared TLS boundary with DER certificate/key material rather than duplicating TLS configuration.
 - PC heartbeat is emitted only after authentication in the authenticated session path.
 - PC outbound pairing/GUI messages continue through the serialized session writer.
 - PC discovery peer registry with TTL.
@@ -139,9 +143,22 @@ PC Rust Core
 - [x] ConnectionManager accepts TLS over arbitrary AsyncRead/AsyncWrite transports.
 - [x] Authenticated ControlSession is connected to ConnectionCoordinator route persistence.
 - [x] Refactor the PC authenticated session handler to accept generic TLS transports.
-- [x] Connect the Windows RFCOMM accept/listener loop into `serve_tls_stream()`.
+- [x] Connect the Windows RFCOMM accept/listener loop into `serve_tls_stream()` at the source-code level.
+- [ ] Confirm Windows RFCOMM → TLS → ControlSession with an actual build/runtime test.
 - [ ] Add Android direct RFCOMM client and reconnect path.
 - [ ] Complete actual direct Bluetooth RFCOMM/L2CAP adapters for Linux and macOS.
+
+## Stabilization checklist
+- [x] Inspect current branch tree and confirm PC/Android projects are present.
+- [x] Inspect Rust dependency set for TLS/Windows Bluetooth foundation.
+- [x] Inspect Identity API against TLS bridge usage.
+- [x] Inspect Windows RFCOMM listener API against the common stream boundary.
+- [x] Fix the confirmed Windows TLS argument mismatch.
+- [ ] Run `cargo check` on PC.
+- [ ] Run `cargo test` on PC.
+- [ ] Run Android unit tests.
+- [ ] Run Android debug compilation.
+- [ ] Resolve remaining compile/API errors before adding Linux/macOS transports.
 
 ## Pairing UX
 - [x] PC displays the stable pairing short code in the desktop wizard.
@@ -201,7 +218,7 @@ PC Rust Core
 10. Refresh the current file SHA immediately before every update; never reuse an older blob SHA.
 
 ## Handoff
-Read this map first, then continue from the first unchecked P0 item. Do not run builds/tests until the planned stabilization pass unless explicitly requested.
+Read this map first, then continue from the first unchecked stabilization item. Do not add Linux/macOS transports until the PC and Android builds are actually green.
 
 ## Next coding target
-**Add the Android direct RFCOMM client/reconnect path, then implement the Linux BlueZ transport adapter and macOS IOBluetooth transport adapter using the same ByteStream → TLS → ControlSession path.**
+**Run the PC/Android build and test pass. Fix every compile/API issue found. Only then continue with Android direct RFCOMM, Linux BlueZ, and macOS IOBluetooth.**
