@@ -1,14 +1,15 @@
 //! Windows native RFCOMM transport using the WinRT Bluetooth stack.
 //!
-//! This module deliberately stops at StreamSocket. The common PhoneBridge
-//! byte-stream adapter is kept separate so TLS and pairing remain unchanged.
+//! This module owns the incoming/outgoing RFCOMM listener and deliberately
+//! exposes only StreamSocket at the platform boundary. TLS and pairing stay
+//! transport-independent above this layer.
 
 #![cfg(windows)]
 
 use anyhow::{Context, Result};
-use windows::Devices::Bluetooth::Rfcomm::{RfcommDeviceService, RfcommServiceId};
+use windows::Devices::Bluetooth::Rfcomm::{RfcommDeviceService, RfcommServiceId, RfcommServiceProvider};
 use windows::Devices::Enumeration::DeviceInformation;
-use windows::Networking::Sockets::{SocketProtectionLevel, StreamSocket};
+use windows::Networking::Sockets::{SocketProtectionLevel, StreamSocket, StreamSocketListener, StreamSocketListenerConnectionReceivedEventArgs};
 use windows::Storage::Streams::{DataReader, InputStreamOptions};
 
 use super::bluetooth::{BluetoothEndpoint, BluetoothSupport, BluetoothTransportKind};
@@ -25,6 +26,11 @@ pub struct WindowsBluetoothDevice {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct WindowsBluetoothTransport;
 
+pub struct WindowsBluetoothListener {
+    provider: RfcommServiceProvider,
+    listener: StreamSocketListener,
+}
+
 impl WindowsBluetoothTransport {
     pub fn new() -> Self { Self }
 
@@ -33,13 +39,11 @@ impl WindowsBluetoothTransport {
         let selector = RfcommDeviceService::GetDeviceSelector(SERVICE_UUID)?;
         let devices = DeviceInformation::FindAllAsync(&selector)?.await?;
         let mut result = Vec::with_capacity(devices.Size()? as usize);
-
         for index in 0..devices.Size()? {
             let device = devices.GetAt(index)?;
-            let name = device.Name()?.to_string_lossy();
             result.push(WindowsBluetoothDevice {
                 id: device.Id()?.to_string_lossy(),
-                name,
+                name: device.Name()?.to_string_lossy(),
                 address: String::new(),
             });
         }
@@ -59,8 +63,37 @@ impl WindowsBluetoothTransport {
         Ok(socket)
     }
 
-    /// Read a small diagnostic sample from the socket without consuming the
-    /// PhoneBridge framing layer. This is useful for future transport probing.
+    /// Start advertising the PhoneBridge RFCOMM service and return the listener.
+    /// Windows exposes incoming RFCOMM connections through StreamSocketListener.
+    pub async fn listen(&self) -> Result<WindowsBluetoothListener> {
+        let provider = RfcommServiceProvider::CreateAsync(SERVICE_UUID)?.await?;
+        let listener = StreamSocketListener::new()?;
+        listener.BindServiceNameAsyncWithProtectionLevel(
+            &provider.ServiceId()?.AsString()?,
+            SocketProtectionLevel::BluetoothEncryptionAllowNullAuthentication,
+        )?.await?;
+        provider.StartAdvertising(&listener)?;
+        Ok(WindowsBluetoothListener { provider, listener })
+    }
+
+    /// Install the incoming connection callback. The callback receives the
+    /// native StreamSocket so the common transport layer can wrap it next.
+    pub fn on_connection<F>(&self, listener: &WindowsBluetoothListener, callback: F) -> Result<()>
+    where
+        F: Fn(StreamSocket) + Send + Sync + 'static,
+    {
+        let callback = std::sync::Arc::new(callback);
+        listener.listener.ConnectionReceived(&windows::Foundation::TypedEventHandler::new(
+            move |_sender: Option<&StreamSocketListener>, args: Option<&StreamSocketListenerConnectionReceivedEventArgs>| {
+                if let Some(args) = args {
+                    if let Ok(socket) = args.Socket() { callback(socket); }
+                }
+                Ok(())
+            },
+        ))?;
+        Ok(())
+    }
+
     pub async fn read_probe(&self, socket: &StreamSocket) -> Result<Vec<u8>> {
         let reader = DataReader::CreateDataReader(&socket.InputStream()?);
         reader.SetInputStreamOptions(InputStreamOptions::Partial)?;
@@ -81,4 +114,16 @@ impl WindowsBluetoothTransport {
     }
 
     pub fn support(&self) -> BluetoothSupport { BluetoothSupport::Supported }
+}
+
+impl WindowsBluetoothListener {
+    pub fn service_id(&self) -> String {
+        self.provider.ServiceId().map(|id| id.AsString().to_string_lossy()).unwrap_or_default()
+    }
+
+    pub fn stop(&self) -> Result<()> {
+        self.provider.StopAdvertising()?;
+        self.listener.Close();
+        Ok(())
+    }
 }
