@@ -5,13 +5,8 @@
 use anyhow::Result;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
 use tokio::task::JoinHandle;
-use windows::Storage::Streams::{DataReader, DataWriter, InputStreamOptions};
 use windows::Networking::Sockets::StreamSocket;
-
-use crate::connection::ByteStream;
-
-const BRIDGE_BUFFER: usize = 16 * 1024;
-const DUPLEX_CAPACITY: usize = 64 * 1024;
+use windows::Storage::Streams::{DataReader, DataWriter, InputStreamOptions};
 
 /// A Tokio stream backed by a native Windows RFCOMM StreamSocket.
 pub struct WindowsSocketStream {
@@ -22,7 +17,7 @@ pub struct WindowsSocketStream {
 impl WindowsSocketStream {
     /// Start bidirectional WinRT↔Tokio forwarding without exposing WinRT types to core code.
     pub async fn from_socket(socket: StreamSocket) -> Result<Self> {
-        let (mut app, mut bridge) = tokio::io::duplex(DUPLEX_CAPACITY);
+        let (app, bridge) = tokio::io::duplex(64 * 1024);
         let input = socket.InputStream()?;
         let output = socket.OutputStream()?;
         let bridge_task = tokio::spawn(async move {
@@ -32,32 +27,36 @@ impl WindowsSocketStream {
             let (mut app_read, mut app_write) = tokio::io::split(bridge);
 
             let read_task = async {
-                let mut buffer = vec![0u8; BRIDGE_BUFFER];
+                let mut buffer = vec![0u8; 16 * 1024];
                 loop {
-                    let loaded = reader.LoadAsync(BRIDGE_BUFFER as u32).ok()?.await.ok()?;
+                    let loaded = match reader.LoadAsync(buffer.len() as u32) {
+                        Ok(operation) => match operation.await { Ok(value) => value, Err(_) => break },
+                        Err(_) => break,
+                    };
                     if loaded == 0 { break; }
                     let n = loaded as usize;
                     if reader.ReadBytes(&mut buffer[..n]).is_err() { break; }
                     if app_write.write_all(&buffer[..n]).await.is_err() { break; }
                 }
-                Some(())
             };
 
             let write_task = async {
-                let mut buffer = vec![0u8; BRIDGE_BUFFER];
+                let mut buffer = vec![0u8; 16 * 1024];
                 loop {
                     let n = match app_read.read(&mut buffer).await {
                         Ok(0) | Err(_) => break,
                         Ok(n) => n,
                     };
                     if writer.WriteBytes(&buffer[..n]).is_err() { break; }
-                    if writer.StoreAsync().ok()?.await.is_err() { break; }
+                    match writer.StoreAsync() {
+                        Ok(operation) => { if operation.await.is_err() { break; } }
+                        Err(_) => break,
+                    }
                 }
-                Some(())
             };
 
             let _ = tokio::join!(read_task, write_task);
-            let _ = writer.FlushAsync().ok().and_then(|operation| operation.await.ok());
+            if let Ok(operation) = writer.FlushAsync() { let _ = operation.await; }
         });
 
         Ok(Self { stream: app, bridge: Some(bridge_task) })
@@ -96,5 +95,3 @@ impl tokio::io::AsyncWrite for WindowsSocketStream {
         std::pin::Pin::new(&mut self.stream).poll_shutdown(cx)
     }
 }
-
-impl ByteStream for WindowsSocketStream {}
