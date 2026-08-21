@@ -102,6 +102,10 @@ PC Rust Core
 - Desktop GUI commands are routed to the live connection by `PairingCommandHub`.
 - Live PC pairing session handles desktop Allow/Reject commands and persists trust only after successful approval.
 - Desktop Forget command revokes PC trust and closes the active session.
+- `ConnectionManager` accepts any TLS stream over the common Tokio AsyncRead/AsyncWrite boundary.
+- `serve_authenticated()` now owns a live `ControlSession` and persists the selected transport only after the session becomes authenticated.
+- PC heartbeat is emitted only after authentication in the authenticated session path.
+- PC outbound pairing/GUI messages continue through the serialized ConnectionManager writer.
 - PC discovery peer registry with TTL.
 - PC CallController and Android CallManager/CallBridge/InCallService foundation.
 - Dedicated Windows/Linux/macOS HFP backend boundaries.
@@ -116,7 +120,7 @@ PC Rust Core
 - [x] Graceful disconnect frame and peer-close handling.
 - [x] Android persistent trust data integration in PairingManager.
 - [x] Keep Android feature writes serialized through ConnectionManager.
-- [ ] PC-side periodic heartbeat sender.
+- [x] PC-side periodic heartbeat sender in the live authenticated session path.
 - [x] Android can persist the last PC endpoint independently of discovery.
 - [x] Android can persist the selected PC identity.
 - [x] Persist preferred transport route metadata and prioritize it during reconnect.
@@ -125,12 +129,14 @@ PC Rust Core
 - [x] Connect saved-PC selection directly to live Android ConnectionManager.
 - [x] PC RouteStore is available to the live ConnectionCoordinator.
 - [x] Route persistence is exposed only through `mark_authenticated()` on the PC coordinator.
-- [ ] Wire `mark_authenticated()` into the actual authenticated ControlSession owner.
+- [x] Wire `mark_authenticated()` into the authenticated ControlSession owner.
 - [x] Windows WinRT RFCOMM discovery/connect backend foundation.
 - [x] Expose Windows RFCOMM backend through the platform module.
 - [x] Adapt WinRT StreamSocket to the common Tokio byte-stream boundary.
 - [x] Add transport-independent TLS server acceptor boundary.
-- [ ] Connect the Windows byte stream to the TLS acceptor and live ControlSession.
+- [x] ConnectionManager accepts TLS over arbitrary AsyncRead/AsyncWrite transports.
+- [x] Authenticated ControlSession is connected to ConnectionCoordinator route persistence.
+- [ ] Connect the Windows byte stream into the TLS acceptor at the actual Windows listener/accept loop.
 - [ ] Complete actual direct Bluetooth RFCOMM/L2CAP adapters for Linux and macOS.
 
 ## Pairing UX
@@ -194,4 +200,4 @@ PC Rust Core
 Read this map first, then continue from the first unchecked P0 item. Do not run builds/tests until the planned stabilization pass unless explicitly requested.
 
 ## Next coding target
-**Connect the Windows ByteStream to the TLS acceptor and live ControlSession, then wire authenticated ControlSession ownership to `ConnectionCoordinator::mark_authenticated()`.**
+**Wire the actual Windows RFCOMM accept/listener path into `tls::accept()` + `ConnectionManager::serve_authenticated()`. Then add the equivalent Linux BlueZ and macOS Bluetooth transport adapters.**
