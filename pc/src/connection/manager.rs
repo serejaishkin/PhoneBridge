@@ -3,12 +3,11 @@ use super::state::ConnectionState;
 use anyhow::{Context, Result};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::TcpStream;
 use tokio::sync::{mpsc, watch, Mutex};
 use tokio::time::{interval, Duration};
 use tokio_rustls::server::TlsStream;
 
-pub type ControlStream = TlsStream<TcpStream>;
+pub type ControlStream<IO> = TlsStream<IO>;
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
 
 pub struct ConnectionManager {
@@ -26,8 +25,13 @@ impl ConnectionManager {
     pub fn sender(&self) -> mpsc::Sender<Message> { self.outbound_tx.clone() }
     pub fn set_state(&self, state: ConnectionState) { self.state_tx.send_replace(state); }
 
-    pub async fn serve<F>(&self, stream: ControlStream, on_message: F) -> Result<()>
-    where F: Fn(Message) + Send + Sync + 'static {
+    /// Serve the encrypted control protocol over any TLS stream whose inner transport
+    /// implements Tokio AsyncRead/AsyncWrite. This keeps Wi-Fi and Bluetooth identical above TLS.
+    pub async fn serve<IO, F>(&self, stream: ControlStream<IO>, on_message: F) -> Result<()>
+    where
+        IO: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+        F: Fn(Message) + Send + Sync + 'static,
+    {
         self.state_tx.send_replace(ConnectionState::Connected);
         let (reader, mut writer) = tokio::io::split(stream);
         let mut lines = BufReader::new(reader).lines();
@@ -54,6 +58,7 @@ impl ConnectionManager {
                         Some(message) => {
                             let close = matches!(message, Message::Disconnect { .. });
                             writer.write_all(message.to_line()?.as_bytes()).await?;
+                            writer.flush().await?;
                             if close { let _ = writer.shutdown().await; break; }
                         }
                         None => break,
@@ -61,6 +66,7 @@ impl ConnectionManager {
                 }
                 _ = heartbeat.tick() => {
                     writer.write_all(Message::Ping.to_line()?.as_bytes()).await?;
+                    writer.flush().await?;
                 }
             }
         }
