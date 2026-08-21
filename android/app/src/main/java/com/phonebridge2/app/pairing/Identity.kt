@@ -10,9 +10,9 @@ import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.Date
 import javax.security.auth.x500.X500Principal
-import org.bouncycastle.cert.jcajce.JcaContentSignerBuilder
-import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
+import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder
+import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
 
 /**
  * Аналог pc/src/pairing/identity.rs на стороне телефона: свой самоподписанный
@@ -55,8 +55,6 @@ class Identity private constructor(
             val serial = BigInteger(64, SecureRandom())
             val subject = X500Principal("CN=$deviceId")
 
-            // JcaX509v3CertificateBuilder принимает java.security.PublicKey
-            // напрямую и сам корректно строит SubjectPublicKeyInfo.
             val certBuilder = JcaX509v3CertificateBuilder(
                 subject,
                 serial,
