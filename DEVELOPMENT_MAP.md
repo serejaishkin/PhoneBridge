@@ -65,7 +65,7 @@ Use as the primary reference/base for:
 - existing Linux/Windows/macOS desktop foundation;
 - Android protocol implementation where appropriate.
 
-The current KDE Connect protocol reference documents `kdeconnect.identity` and `kdeconnect.pair`; protocol version 8 is current in that reference. Pairing is explicit and devices must be paired before normal packets are accepted. The PhoneBridge compatibility layer follows this model. 
+The current KDE Connect protocol reference documents `kdeconnect.identity` and `kdeconnect.pair`; protocol version 8 is current in that reference. Pairing is explicit and devices must be paired before normal packets are accepted. The PhoneBridge compatibility layer follows this model.
 
 ### Sefirah
 Use as a feature/UX reference and, where legally appropriate, as source for selected GPL components:
@@ -112,6 +112,9 @@ Reuse only where it provides functionality not already better supplied by the se
 - [x] Add a UI-independent pairing state machine with explicit Allow/Reject decisions.
 - [x] Add an interactive desktop pairing playground to make the new pairing flow tangible before network integration.
 - [x] Keep the pairing playground isolated from the production daemon.
+- [x] Fix duplicate Rust `protocol` module layout (`protocol.rs` vs `protocol/mod.rs`).
+- [x] Restore PC dependencies required by existing audio/network modules (`cpal`, `opus`, `crossbeam-channel`, `parking_lot`, `tokio-tungstenite`).
+- [x] Expose the existing `pairing` module from the PC library.
 - [ ] Pin exact KDE Connect Android/desktop versions or commits to use as reference/base.
 - [ ] Map PhoneBridge files to KDE Connect equivalents.
 - [ ] Identify code that can be reused directly.
@@ -181,6 +184,24 @@ The demo currently provides:
 
 This is a **UX/protocol smoke playground**, not yet a real phone connection test.
 
+## Build/test status
+The first local build attempt on Windows exposed integration errors in the migration branch. The reported blockers were:
+- duplicate Rust module definition: both `src/protocol.rs` and `src/protocol/mod.rs` existed;
+- `pairing` was not exported from `lib.rs`;
+- existing audio/network code referenced dependencies missing from the branch `Cargo.toml`.
+
+Fixes have been committed for all three categories. **The fixes have not yet been locally recompiled after the commits**, so the branch remains `build verification pending`.
+
+Next local verification:
+```text
+cd pc
+cargo check
+cargo test
+cargo run --bin phonebridge-pairing-demo
+```
+
+Do not mark the build/test gate as passed until these commands actually complete successfully.
+
 ## Frozen custom stack
 The previous implementation contains:
 - Identity;
@@ -209,4 +230,4 @@ Before deleting or replacing old components:
 ## Handoff
 Read this file first before continuing development.
 
-**Immediate next task:** wire the KDE Connect-compatible pairing model into the real PC TLS connection and then add the matching Android packet/session implementation. Keep the desktop demo available until real pairing works.
+**Immediate next task:** run the fixed PC build/test locally, then wire the KDE Connect-compatible pairing model into the real PC TLS connection and add the matching Android packet/session implementation. Keep the desktop demo available until real pairing works.
