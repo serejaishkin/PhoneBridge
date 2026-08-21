@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "com.phonebridge2.app"
+    namespace = "com.phonebridge.app"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.phonebridge2.app"
+        applicationId = "com.phonebridge.app"
         // minSdk 31, потому что control-plane опирается на TelephonyCallback
         // (замена deprecated PhoneStateListener) — это Android 12 (API 31)+.
         // См. AI_HANDOFF_GUI.md, п.4.1 — реальная поддержка звонков всё равно
@@ -47,7 +47,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
-    // Генерация самоподписанного X.509-сертификата для TLS-пейринга (см. pairing/Identity.kt) —
-    // стандартный javax.security на Android не даёт собрать сертификат без внешнего CA.
+    implementation("org.java-websocket:Java-WebSocket:1.5.6")
+    // Генерация самоподписанного X.509-сертификата для TLS-пейринга.
     implementation("org.bouncycastle:bcpkix-jdk18on:1.78.1")
 }
