@@ -72,12 +72,13 @@ impl WindowsBluetoothTransport {
             &provider.ServiceId()?.AsString()?,
             SocketProtectionLevel::BluetoothEncryptionAllowNullAuthentication,
         )?.await?;
-        provider.StartAdvertising(&listener)?;
+        // Keep radio discoverability explicit. Pairing/trust is still performed by
+        // PhoneBridge over TLS; Bluetooth discoverability must never imply trust.
+        provider.StartAdvertisingWithRadioDiscoverability(&listener, true)?;
         Ok(WindowsBluetoothListener { provider, listener })
     }
 
-    /// Install the incoming connection callback. The callback receives the
-    /// native StreamSocket so the common transport layer can wrap it next.
+    /// Install a synchronous callback for callers that only need the native socket.
     pub fn on_connection<F>(&self, listener: &WindowsBluetoothListener, callback: F) -> Result<()>
     where
         F: Fn(StreamSocket) + Send + Sync + 'static,
@@ -87,6 +88,37 @@ impl WindowsBluetoothTransport {
             move |_sender: Option<&StreamSocketListener>, args: Option<&StreamSocketListenerConnectionReceivedEventArgs>| {
                 if let Some(args) = args {
                     if let Ok(socket) = args.Socket() { callback(socket); }
+                }
+                Ok(())
+            },
+        ))?;
+        Ok(())
+    }
+
+    /// Install an asynchronous callback and spawn each accepted socket on the
+    /// supplied Tokio runtime. This is the handoff point to TLS + ControlSession.
+    pub fn on_connection_async<F, Fut>(
+        &self,
+        listener: &WindowsBluetoothListener,
+        runtime: tokio::runtime::Handle,
+        callback: F,
+    ) -> Result<()>
+    where
+        F: Fn(StreamSocket) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = Result<()>> + Send + 'static,
+    {
+        let callback = std::sync::Arc::new(callback);
+        listener.listener.ConnectionReceived(&windows::Foundation::TypedEventHandler::new(
+            move |_sender: Option<&StreamSocketListener>, args: Option<&StreamSocketListenerConnectionReceivedEventArgs>| {
+                if let Some(args) = args {
+                    if let Ok(socket) = args.Socket() {
+                        let callback = callback.clone();
+                        runtime.spawn(async move {
+                            if let Err(error) = callback(socket).await {
+                                log::warn!("Windows RFCOMM incoming session failed: {}", error);
+                            }
+                        });
+                    }
                 }
                 Ok(())
             },
