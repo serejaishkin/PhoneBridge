@@ -117,6 +117,7 @@ Reuse only where it provides functionality not already better supplied by the se
 - [x] Expose the existing `pairing` module from the PC library.
 - [x] Remove the obsolete `SharedState` dependency from the WebSocket shell while the connection-state architecture is migrated.
 - [x] Fix audio input type mismatches between CPAL PCM callbacks and the Opus channel.
+- [x] Export `PairingSession` from the KDE Connect module so the desktop pairing demo can compile.
 - [ ] Pin exact KDE Connect Android/desktop versions or commits to use as reference/base.
 - [ ] Map PhoneBridge files to KDE Connect equivalents.
 - [ ] Identify code that can be reused directly.
@@ -187,18 +188,28 @@ The demo currently provides:
 This is a **UX/protocol smoke playground**, not yet a real phone connection test.
 
 ## Build/test status
-The latest local Windows `cargo check` exposed five migration-branch errors. They have now been addressed in commits:
-- obsolete `crate::protocol::SharedState` dependency in the WebSocket shell;
-- CPAL `f32 -> i16` conversion bound;
-- incorrect Opus receiver type stored in `AudioInput`;
-- ambiguous generic sample conversion;
-- incorrect `recv_opus()` receiver type.
+### Latest user-provided Windows check
+The branch compiled the library successfully but the pairing demo failed with one error:
 
-**These fixes have not yet been locally recompiled after the latest commits**, so the branch remains `build verification pending`.
+```text
+error[E0432]: unresolved import `kdeconnect::PairingSession`
+```
+
+The cause was a missing public re-export from `pc/src/kdeconnect/mod.rs`.
+
+### Fix just committed
+`PairingSession` is now publicly re-exported alongside `PairingDecision`, `PairingEvent`, and `PairingState`.
+
+Fix commit:
+```text
+42962017c685446f6f1d6602990eced6b012b3d7
+```
+
+The fix has **not yet been locally recompiled after this commit**, so the branch remains `build verification pending`.
 
 Next local verification:
 ```text
-cd pc
+cd /d/GitHub/PhoneBridge/pc
 cargo check
 cargo test
 cargo run --bin phonebridge-pairing-demo
