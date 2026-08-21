@@ -115,6 +115,8 @@ Reuse only where it provides functionality not already better supplied by the se
 - [x] Fix duplicate Rust `protocol` module layout (`protocol.rs` vs `protocol/mod.rs`).
 - [x] Restore PC dependencies required by existing audio/network modules (`cpal`, `opus`, `crossbeam-channel`, `parking_lot`, `tokio-tungstenite`).
 - [x] Expose the existing `pairing` module from the PC library.
+- [x] Remove the obsolete `SharedState` dependency from the WebSocket shell while the connection-state architecture is migrated.
+- [x] Fix audio input type mismatches between CPAL PCM callbacks and the Opus channel.
 - [ ] Pin exact KDE Connect Android/desktop versions or commits to use as reference/base.
 - [ ] Map PhoneBridge files to KDE Connect equivalents.
 - [ ] Identify code that can be reused directly.
@@ -185,12 +187,14 @@ The demo currently provides:
 This is a **UX/protocol smoke playground**, not yet a real phone connection test.
 
 ## Build/test status
-The first local build attempt on Windows exposed integration errors in the migration branch. The reported blockers were:
-- duplicate Rust module definition: both `src/protocol.rs` and `src/protocol/mod.rs` existed;
-- `pairing` was not exported from `lib.rs`;
-- existing audio/network code referenced dependencies missing from the branch `Cargo.toml`.
+The latest local Windows `cargo check` exposed five migration-branch errors. They have now been addressed in commits:
+- obsolete `crate::protocol::SharedState` dependency in the WebSocket shell;
+- CPAL `f32 -> i16` conversion bound;
+- incorrect Opus receiver type stored in `AudioInput`;
+- ambiguous generic sample conversion;
+- incorrect `recv_opus()` receiver type.
 
-Fixes have been committed for all three categories. **The fixes have not yet been locally recompiled after the commits**, so the branch remains `build verification pending`.
+**These fixes have not yet been locally recompiled after the latest commits**, so the branch remains `build verification pending`.
 
 Next local verification:
 ```text
