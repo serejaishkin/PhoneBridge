@@ -9,4 +9,4 @@ pub mod packet;
 pub mod pairing;
 
 pub use packet::{IdentityPacket, PairPacket, Packet};
-pub use pairing::{PairingDecision, PairingEvent, PairingState};
+pub use pairing::{PairingDecision, PairingEvent, PairingSession, PairingState};
