@@ -1,4 +1,7 @@
 use crate::protocol::Message;
+use super::coordinator::ConnectionCoordinator;
+use super::route::RouteKind;
+use super::session::ControlSession;
 use super::state::ConnectionState;
 use anyhow::{Context, Result};
 use std::sync::Arc;
@@ -65,6 +68,73 @@ impl ConnectionManager {
                     }
                 }
                 _ = heartbeat.tick() => {
+                    writer.write_all(Message::Ping.to_line()?.as_bytes()).await?;
+                    writer.flush().await?;
+                }
+            }
+        }
+        self.state_tx.send_replace(ConnectionState::Disconnected);
+        Ok(())
+    }
+
+    /// Serve a TLS control session and persist the transport route only after the
+    /// protocol session itself reaches the authenticated state.
+    pub async fn serve_authenticated<IO>(
+        &self,
+        stream: ControlStream<IO>,
+        route: RouteKind,
+        coordinator: Arc<Mutex<ConnectionCoordinator>>,
+        trusted: bool,
+        peer_fingerprint: Option<String>,
+    ) -> Result<()>
+    where
+        IO: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    {
+        self.state_tx.send_replace(ConnectionState::Handshaking);
+        let (reader, mut writer) = tokio::io::split(stream);
+        let mut lines = BufReader::new(reader).lines();
+        let mut outbound = self.outbound_rx.lock().await.take().context("connection manager already serving")?;
+        let mut session = ControlSession::new();
+        let mut heartbeat = interval(HEARTBEAT_INTERVAL);
+        heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut authenticated = false;
+
+        loop {
+            tokio::select! {
+                line = lines.next_line() => {
+                    match line? {
+                        Some(line) => {
+                            let message = Message::from_line(&line)?;
+                            let close = matches!(message, Message::Disconnect { .. });
+                            let responses = session
+                                .handle_with_peer(message, trusted, peer_fingerprint.as_deref())
+                                .await?;
+                            for response in responses {
+                                writer.write_all(response.to_line()?.as_bytes()).await?;
+                            }
+                            writer.flush().await?;
+                            if !authenticated && session.is_authenticated() {
+                                coordinator.lock().await.mark_authenticated(route)?;
+                                authenticated = true;
+                                self.state_tx.send_replace(ConnectionState::Connected);
+                            }
+                            if close { break; }
+                        }
+                        None => break,
+                    }
+                }
+                outgoing = outbound.recv() => {
+                    match outgoing {
+                        Some(message) => {
+                            let close = matches!(message, Message::Disconnect { .. });
+                            writer.write_all(message.to_line()?.as_bytes()).await?;
+                            writer.flush().await?;
+                            if close { let _ = writer.shutdown().await; break; }
+                        }
+                        None => break,
+                    }
+                }
+                _ = heartbeat.tick(), if authenticated => {
                     writer.write_all(Message::Ping.to_line()?.as_bytes()).await?;
                     writer.flush().await?;
                 }
