@@ -5,30 +5,33 @@ import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.net.InetSocketAddress
-import java.net.Socket
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
 import java.util.UUID
+import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
 
 /**
  * Minimal Android client for the first end-to-end PC pairing test.
  *
- * The implementation intentionally keeps discovery out of this class: the
- * caller supplies the PC address discovered by Wi-Fi, hotspot, or Bluetooth
- * transport adapters later.
+ * Discovery is intentionally kept outside this class: the caller supplies
+ * the PC address discovered by Wi-Fi, hotspot, or later Bluetooth adapters.
  */
 class PcPairingClient(
     private val port: Int = 1716,
 ) {
     suspend fun pair(host: String): PairingResult = withContext(Dispatchers.IO) {
         try {
-            Socket().use { socket ->
+            createTestTlsContext().socketFactory.createSocket().use { raw ->
+                val socket = raw as SSLSocket
                 socket.connect(InetSocketAddress(host, port), 5_000)
                 socket.soTimeout = 10_000
+                socket.startHandshake()
 
-                // First iteration uses the PC's TLS endpoint with a permissive
-                // certificate policy. Fingerprint verification is added once
-                // the Android-side persistent identity is wired in.
-                val input = BufferedInputStream(socket.getInputStream())
-                val output = BufferedOutputStream(socket.getOutputStream())
+                val input = BufferedInputStream(socket.inputStream)
+                val output = BufferedOutputStream(socket.outputStream)
 
                 val deviceId = UUID.randomUUID().toString().replace("-", "")
                 val identity = """
@@ -44,7 +47,8 @@ class PcPairingClient(
                 """.trimIndent().replace("\n", "")
 
                 writePacket(output, identity)
-                val pcIdentity = readPacket(input) ?: return@withContext PairingResult.Failed("PC closed before identity")
+                val pcIdentity = readPacket(input)
+                    ?: return@withContext PairingResult.Failed("PC closed before identity")
                 if (!pcIdentity.contains("kdeconnect.identity")) {
                     return@withContext PairingResult.Failed("Unexpected PC packet")
                 }
@@ -54,7 +58,8 @@ class PcPairingClient(
                 """.trimIndent().replace("\n", "")
                 writePacket(output, pair)
 
-                val response = readPacket(input) ?: return@withContext PairingResult.Failed("PC closed before pairing response")
+                val response = readPacket(input)
+                    ?: return@withContext PairingResult.Failed("PC closed before pairing response")
                 if (response.contains("\"pair\":true")) {
                     PairingResult.Accepted
                 } else {
@@ -63,6 +68,22 @@ class PcPairingClient(
             }
         } catch (e: Exception) {
             PairingResult.Failed(e.message ?: e.javaClass.simpleName)
+        }
+    }
+
+    /**
+     * Temporary test-only trust policy. The PC certificate is self-signed,
+     * so the first integration test deliberately accepts it. Real fingerprint
+     * verification must replace this before production pairing is enabled.
+     */
+    private fun createTestTlsContext(): SSLContext {
+        val trustAll = object : X509TrustManager {
+            override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
+            override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) = Unit
+            override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) = Unit
+        }
+        return SSLContext.getInstance("TLS").apply {
+            init(null, arrayOf<TrustManager>(trustAll), SecureRandom())
         }
     }
 
