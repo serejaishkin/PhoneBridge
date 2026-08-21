@@ -25,6 +25,7 @@ PC Rust Core
   ├── PeerRegistry / TTL
   ├── RouteMemory / RouteStore / ConnectionCoordinator
   ├── Common ByteStream transport boundary
+  ├── Transport-independent TLS acceptor boundary
   ├── TLS control plane
   ├── Protocol
   ├── Identity / TrustStore / PairingSession
@@ -91,12 +92,14 @@ PC Rust Core
 - Windows WinRT RFCOMM discovery and StreamSocket connect foundation.
 - Windows native RFCOMM transport module is exposed through the platform layer.
 - Windows StreamSocket has a Tokio duplex bridge implementing the common byte-stream contract.
+- Transport-independent PC TLS server acceptor boundary using tokio-rustls.
+- TLS handshake timeout is enforced at the transport boundary.
 - Cross-platform Iced desktop GUI with dashboard, pairing wizard and diagnostics views.
 - Desktop GUI launches on its own thread so the Tokio daemon is not blocked.
 - PC pairing server emits live pairing challenge/result events to the shared UI backend.
 - PC protocol and ControlSession accept explicit pairing approve/reject operations.
 - Desktop GUI contains Allow/Reject/Forget controls and exposes their UI events.
-- Desktop GUI commands are now routed to the live connection by `PairingCommandHub`.
+- Desktop GUI commands are routed to the live connection by `PairingCommandHub`.
 - Live PC pairing session handles desktop Allow/Reject commands and persists trust only after successful approval.
 - Desktop Forget command revokes PC trust and closes the active session.
 - PC discovery peer registry with TTL.
@@ -126,7 +129,8 @@ PC Rust Core
 - [x] Windows WinRT RFCOMM discovery/connect backend foundation.
 - [x] Expose Windows RFCOMM backend through the platform module.
 - [x] Adapt WinRT StreamSocket to the common Tokio byte-stream boundary.
-- [ ] Connect the Windows byte stream to the actual TLS connector.
+- [x] Add transport-independent TLS server acceptor boundary.
+- [ ] Connect the Windows byte stream to the TLS acceptor and live ControlSession.
 - [ ] Complete actual direct Bluetooth RFCOMM/L2CAP adapters for Linux and macOS.
 
 ## Pairing UX
@@ -190,4 +194,4 @@ PC Rust Core
 Read this map first, then continue from the first unchecked P0 item. Do not run builds/tests until the planned stabilization pass unless explicitly requested.
 
 ## Next coding target
-**Connect the Windows ByteStream to the existing TLS client connector, then wire authenticated ControlSession ownership to `ConnectionCoordinator::mark_authenticated()`.**
+**Connect the Windows ByteStream to the TLS acceptor and live ControlSession, then wire authenticated ControlSession ownership to `ConnectionCoordinator::mark_authenticated()`.**
