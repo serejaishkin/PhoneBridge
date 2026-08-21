@@ -10,21 +10,15 @@ import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.Date
 import javax.security.auth.x500.X500Principal
-import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo
 import org.bouncycastle.cert.X509v3CertificateBuilder
+import org.bouncycastle.cert.jcajce.JcaContentSignerBuilder
+import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
-import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
 
 /**
  * Аналог pc/src/pairing/identity.rs на стороне телефона: свой самоподписанный
  * сертификат, который живёт годами на диске, доверие — по fingerprint, не по
  * центру сертификации.
- *
- * Использует Bouncy Castle (org.bouncycastle:bcpkix-jdk18on), потому что
- * стандартный javax.security на Android не даёт напрямую собрать X509-сертификат
- * из голого KeyPair без URL до внешнего CA — это ограничение платформы, не наш выбор.
- * Добавить зависимость в app/build.gradle.kts (TODO — сейчас её там нет,
- * см. HANDOFF-документ, раздел "что не хватает для сборки").
  */
 class Identity private constructor(
     val deviceId: String,
@@ -58,17 +52,20 @@ class Identity private constructor(
             val keyPair = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()
 
             val now = Date()
-            val expiry = Date(now.time + 20L * 365 * 24 * 3600 * 1000) // 20 лет — сертификат не про TTL, а про identity
+            val expiry = Date(now.time + 20L * 365 * 24 * 3600 * 1000)
             val serial = BigInteger(64, SecureRandom())
             val subject = X500Principal("CN=$deviceId")
 
-            val certBuilder = X509v3CertificateBuilder(
+            // JcaX509v3CertificateBuilder принимает java.security.PublicKey
+            // напрямую и сам корректно строит SubjectPublicKeyInfo. Это также
+            // избегает несовместимости Kotlin с overloaded BC-конструктором.
+            val certBuilder = JcaX509v3CertificateBuilder(
                 subject,
                 serial,
                 now,
                 expiry,
                 subject,
-                SubjectPublicKeyInfo.getInstance(keyPair.public.encoded)
+                keyPair.public
             )
             val signer = JcaContentSignerBuilder("SHA256withRSA").build(keyPair.private)
             val cert: X509Certificate = JcaX509CertificateConverter().getCertificate(certBuilder.build(signer))
