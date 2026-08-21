@@ -21,6 +21,7 @@ impl ControlSession {
     pub fn with_calls(mut self, calls: Arc<SharedState>) -> Self { self.calls = Some(calls); self }
     pub fn state(&self) -> &ConnectionState { &self.state }
     pub fn pairing(&self) -> &PairingSession { &self.pairing }
+    pub fn pairing_mut(&mut self) -> &mut PairingSession { &mut self.pairing }
     pub fn timeout(&self) -> Duration { let limit = if matches!(self.state, ConnectionState::Connected) { IDLE_TIMEOUT } else { HANDSHAKE_TIMEOUT }; limit.saturating_sub(self.last_activity.elapsed()) }
     pub fn is_expired(&self) -> bool { self.timeout().is_zero() }
     pub fn is_authenticated(&self) -> bool { matches!(self.state, ConnectionState::Connected) }
