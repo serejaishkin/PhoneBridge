@@ -103,9 +103,9 @@ PC Rust Core
 - Live PC pairing session handles desktop Allow/Reject commands and persists trust only after successful approval.
 - Desktop Forget command revokes PC trust and closes the active session.
 - `ConnectionManager` accepts any TLS stream over the common Tokio AsyncRead/AsyncWrite boundary.
-- `serve_authenticated()` now owns a live `ControlSession` and persists the selected transport only after the session becomes authenticated.
+- PC authenticated session entry point is now transport-generic: `serve_tls_stream()` accepts any Tokio AsyncRead/AsyncWrite TLS stream.
 - PC heartbeat is emitted only after authentication in the authenticated session path.
-- PC outbound pairing/GUI messages continue through the serialized ConnectionManager writer.
+- PC outbound pairing/GUI messages continue through the serialized session writer.
 - PC discovery peer registry with TTL.
 - PC CallController and Android CallManager/CallBridge/InCallService foundation.
 - Dedicated Windows/Linux/macOS HFP backend boundaries.
@@ -136,7 +136,8 @@ PC Rust Core
 - [x] Add transport-independent TLS server acceptor boundary.
 - [x] ConnectionManager accepts TLS over arbitrary AsyncRead/AsyncWrite transports.
 - [x] Authenticated ControlSession is connected to ConnectionCoordinator route persistence.
-- [ ] Connect the Windows byte stream into the TLS acceptor at the actual Windows listener/accept loop.
+- [x] Refactor the PC authenticated session handler to accept generic TLS transports.
+- [ ] Connect the Windows RFCOMM accept/listener loop into `serve_tls_stream()`.
 - [ ] Complete actual direct Bluetooth RFCOMM/L2CAP adapters for Linux and macOS.
 
 ## Pairing UX
@@ -200,4 +201,4 @@ PC Rust Core
 Read this map first, then continue from the first unchecked P0 item. Do not run builds/tests until the planned stabilization pass unless explicitly requested.
 
 ## Next coding target
-**Wire the actual Windows RFCOMM accept/listener path into `tls::accept()` + `ConnectionManager::serve_authenticated()`. Then add the equivalent Linux BlueZ and macOS Bluetooth transport adapters.**
+**Wire the actual Windows RFCOMM accept/listener path into `serve_tls_stream()`. Then add the equivalent Linux BlueZ and macOS Bluetooth transport adapters.**
