@@ -2,6 +2,7 @@
 
 use crate::protocol::HfpSupport;
 use async_trait::async_trait;
+use tokio::sync::mpsc;
 
 mod basic;
 mod dashboard;
@@ -32,6 +33,19 @@ impl Default for DesktopUiState {
         Self { screen: UiScreen::Dashboard, connected: false, peer_name: None, peer_address: None, hfp: HfpSupport::Unknown, media_enabled: true, microphone_enabled: true, pairing_code: None, diagnostic_lines: Vec::new() }
     }
 }
+
+/// Commands emitted by the desktop UI and delivered to the live pairing session.
+#[derive(Debug, Clone)]
+pub enum PairingUiCommand {
+    Approve { device_id: String, short_code: String },
+    Reject { device_id: String, reason: String },
+    Forget { device_id: String },
+}
+
+pub type PairingUiCommandSender = mpsc::Sender<PairingUiCommand>;
+pub type PairingUiCommandReceiver = mpsc::Receiver<PairingUiCommand>;
+
+pub fn pairing_command_channel() -> (PairingUiCommandSender, PairingUiCommandReceiver) { mpsc::channel(16) }
 
 #[async_trait]
 pub trait UiBackend: Send + Sync {
