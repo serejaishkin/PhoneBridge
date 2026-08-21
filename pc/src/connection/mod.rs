@@ -1,3 +1,4 @@
+pub mod byte_stream;
 pub mod coordinator;
 pub mod manager;
 pub mod route;
@@ -6,5 +7,6 @@ pub mod session;
 pub mod state;
 pub mod timeout;
 
+pub use byte_stream::{boxed, ByteStream, BoxByteStream, LabeledStream};
 pub use coordinator::ConnectionCoordinator;
 pub use session::ControlSession;
