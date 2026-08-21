@@ -11,6 +11,8 @@ pub use bluetooth::{BluetoothEndpoint, BluetoothSupport, BluetoothTransport, Uns
 
 #[cfg(target_os = "windows")]
 pub mod windows_bluetooth;
+#[cfg(target_os = "windows")]
+pub mod windows_stream;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlatformKind { Windows, MacOS, Linux, Unknown }
