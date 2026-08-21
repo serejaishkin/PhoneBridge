@@ -1,6 +1,6 @@
 # PhoneBridge Development Map
 
-Last updated: 2026-08-20
+Last updated: 2026-08-21
 
 ## Goal
 PhoneBridge is a local-first Android companion for **Windows, macOS and Linux**. The PC core remains platform-neutral; OS-specific integrations live behind platform interfaces.
@@ -27,6 +27,7 @@ PC Rust Core
   ├── TLS control plane
   ├── Protocol
   ├── Identity / TrustStore / PairingSession
+  ├── PairingCommandHub ← Desktop GUI commands
   ├── CallController
   ├── Iced Desktop GUI / dashboard / pairing / diagnostics
   └── Platform
@@ -91,6 +92,9 @@ PC Rust Core
 - PC pairing server emits live pairing challenge/result events to the shared UI backend.
 - PC protocol and ControlSession accept explicit pairing approve/reject operations.
 - Desktop GUI contains Allow/Reject/Forget controls and exposes their UI events.
+- Desktop GUI commands are now routed to the live connection by `PairingCommandHub`.
+- Live PC pairing session handles desktop Allow/Reject commands and persists trust only after successful approval.
+- Desktop Forget command revokes PC trust and closes the active session.
 - PC discovery peer registry with TTL.
 - PC CallController and Android CallManager/CallBridge/InCallService foundation.
 - Dedicated Windows/Linux/macOS HFP backend boundaries.
@@ -128,10 +132,10 @@ PC Rust Core
 - [x] Protocol supports explicit PC Allow/Reject decisions.
 - [x] Android consumes PC Allow/Reject decisions.
 - [x] Desktop GUI exposes Allow/Reject/Forget actions.
-- [ ] Bind desktop Allow/Reject actions to the live session writer.
+- [x] Bind desktop Allow/Reject actions to the live session writer.
 - [x] Android explicit "Forget this PC" control.
-- [ ] PC explicit "Forget this phone" control in the desktop GUI.
-- [ ] Add a PC-side command/API for revoking trust from the GUI.
+- [x] PC explicit "Forget this phone" control in the desktop GUI.
+- [x] PC-side command/API for revoking trust from the GUI.
 
 ## P1 — calls / HFP
 - [ ] Decouple `BridgeInCallService` lifecycle from CallBridge; use an application-level call gateway.
@@ -181,4 +185,4 @@ PC Rust Core
 Read this map first, then continue from the first unchecked P0 item. Do not run builds/tests until the planned stabilization pass unless explicitly requested.
 
 ## Next coding target
-**Bind desktop Allow/Reject/Forget UI events to the live session writer and PC TrustStore, then adapt the Windows WinRT StreamSocket to the common PhoneBridge byte-stream/TLS connector.**
+**Wire `ConnectionCoordinator::mark_authenticated()` into the authenticated ControlSession owner, then adapt the Windows WinRT StreamSocket to the common PhoneBridge byte-stream/TLS connector.**
