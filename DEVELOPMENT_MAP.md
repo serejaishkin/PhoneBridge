@@ -24,6 +24,7 @@ PC Rust Core
   ├── Discovery / UDP LAN + hotspot
   ├── PeerRegistry / TTL
   ├── RouteMemory / RouteStore / ConnectionCoordinator
+  ├── Common ByteStream transport boundary
   ├── TLS control plane
   ├── Protocol
   ├── Identity / TrustStore / PairingSession
@@ -33,6 +34,7 @@ PC Rust Core
   └── Platform
         ├── Bluetooth stream contract
         ├── Windows WinRT RFCOMM backend
+        ├── Windows StreamSocket → Tokio ByteStream bridge
         ├── Linux BlueZ backend [planned]
         ├── macOS IOBluetooth backend [planned]
         └── HfpBackend
@@ -85,8 +87,10 @@ PC Rust Core
 - PC route persistence primitive.
 - PC multi-route ConnectionCoordinator foundation for TCP routes.
 - PC ConnectionCoordinator can load persisted route preference and persist it only after explicit authenticated-session confirmation.
+- Common async ByteStream boundary for all transports.
 - Windows WinRT RFCOMM discovery and StreamSocket connect foundation.
 - Windows native RFCOMM transport module is exposed through the platform layer.
+- Windows StreamSocket has a Tokio duplex bridge implementing the common byte-stream contract.
 - Cross-platform Iced desktop GUI with dashboard, pairing wizard and diagnostics views.
 - Desktop GUI launches on its own thread so the Tokio daemon is not blocked.
 - PC pairing server emits live pairing challenge/result events to the shared UI backend.
@@ -121,7 +125,8 @@ PC Rust Core
 - [ ] Wire `mark_authenticated()` into the actual authenticated ControlSession owner.
 - [x] Windows WinRT RFCOMM discovery/connect backend foundation.
 - [x] Expose Windows RFCOMM backend through the platform module.
-- [ ] Adapt WinRT StreamSocket to the common byte-stream/TLS connector.
+- [x] Adapt WinRT StreamSocket to the common Tokio byte-stream boundary.
+- [ ] Connect the Windows byte stream to the actual TLS connector.
 - [ ] Complete actual direct Bluetooth RFCOMM/L2CAP adapters for Linux and macOS.
 
 ## Pairing UX
@@ -185,4 +190,4 @@ PC Rust Core
 Read this map first, then continue from the first unchecked P0 item. Do not run builds/tests until the planned stabilization pass unless explicitly requested.
 
 ## Next coding target
-**Wire `ConnectionCoordinator::mark_authenticated()` into the authenticated ControlSession owner, then adapt the Windows WinRT StreamSocket to the common PhoneBridge byte-stream/TLS connector.**
+**Connect the Windows ByteStream to the existing TLS client connector, then wire authenticated ControlSession ownership to `ConnectionCoordinator::mark_authenticated()`.**
