@@ -1,17 +1,18 @@
-use crate::protocol::SharedState;
-use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio_tungstenite::accept_async;
 
+/// Minimal WebSocket server shell kept independent from the legacy protocol state.
+///
+/// The KDE Connect migration will eventually carry device/session state through
+/// the common connection layer instead of exposing the old `SharedState` type.
 pub struct WsServer {
     listener: TcpListener,
-    state: Arc<tokio::sync::Mutex<SharedState>>,
 }
 
 impl WsServer {
-    pub async fn new(bind_addr: &str, state: Arc<tokio::sync::Mutex<SharedState>>) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn new(bind_addr: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let listener = TcpListener::bind(bind_addr).await?;
-        Ok(Self { listener, state })
+        Ok(Self { listener })
     }
 
     pub async fn run(&self) {
@@ -19,9 +20,8 @@ impl WsServer {
             match self.listener.accept().await {
                 Ok((stream, addr)) => {
                     log::info!("WebSocket connection from: {}", addr);
-                    let state = self.state.clone();
                     tokio::spawn(async move {
-                        if let Ok(ws_stream) = accept_async(stream).await {
+                        if accept_async(stream).await.is_ok() {
                             log::info!("WebSocket established with {}", addr);
                         }
                     });
