@@ -1,13 +1,14 @@
 //! Desktop pairing playground for the KDE Connect migration.
 //!
-//! The GUI now owns the decision for a real TLS pairing session. Network
+//! The GUI owns the decision for a real TLS pairing session. Network
 //! callbacks are marshalled into the UI thread through a standard channel.
 
 #[path = "../kdeconnect/mod.rs"]
 mod kdeconnect;
 
 use eframe::egui;
-use kdeconnect::{default_security_dir, IncomingPairing, LocalTlsIdentity, PairingDecision, PairingResponder, TlsPairingServer, TLS_PAIRING_PORT};
+use kdeconnect::{default_security_dir, IncomingPairing, LocalTlsIdentity, PairingResponder, TlsPairingServer, TLS_PAIRING_PORT};
+use kdeconnect::tls_server::PairingDecision as TlsPairingDecision;
 use std::sync::mpsc::{self, Receiver, Sender};
 
 struct PendingPairing {
@@ -18,7 +19,6 @@ struct PendingPairing {
 struct PairingDemoApp {
     pending: Option<PendingPairing>,
     event_rx: Receiver<PendingPairing>,
-    event_tx: Sender<PendingPairing>,
     status: String,
     server_error: Option<String>,
 }
@@ -29,7 +29,6 @@ impl PairingDemoApp {
         let mut app = Self {
             pending: None,
             event_rx,
-            event_tx: event_tx.clone(),
             status: format!("Starting TLS pairing server on port {TLS_PAIRING_PORT}…"),
             server_error: None,
         };
@@ -44,10 +43,9 @@ impl PairingDemoApp {
         };
 
         let trust_path = security_dir.join("trusted_peers.json");
-        let server = TlsPairingServer::new(identity.clone(), trust_path);
-        let tx = event_tx;
+        let server = TlsPairingServer::new(identity, trust_path);
         match server.spawn(&format!("0.0.0.0:{TLS_PAIRING_PORT}"), move |request, responder| {
-            let _ = tx.send(PendingPairing { request, responder });
+            let _ = event_tx.send(PendingPairing { request, responder });
         }) {
             Ok(_) => {
                 app.status = format!("TLS pairing server listening on 0.0.0.0:{TLS_PAIRING_PORT}");
@@ -66,14 +64,14 @@ impl PairingDemoApp {
         }
     }
 
-    fn decide(&mut self, decision: PairingDecision) {
+    fn decide(&mut self, decision: TlsPairingDecision) {
         let Some(pending) = self.pending.take() else { return };
         let name = pending.request.identity.device_name.clone();
-        match pending.responder.decide(decision) {
+        match pending.responder.decide(decision.clone()) {
             Ok(()) => {
                 self.status = match decision {
-                    PairingDecision::Accept => format!("Paired with {name}"),
-                    PairingDecision::Reject => format!("Rejected {name}"),
+                    TlsPairingDecision::Accept => format!("Paired with {name}"),
+                    TlsPairingDecision::Reject => format!("Rejected {name}"),
                 };
             }
             Err(error) => self.status = format!("Pairing response error: {error:#}"),
@@ -86,6 +84,17 @@ impl eframe::App for PairingDemoApp {
         self.poll_events();
         ctx.request_repaint_after(std::time::Duration::from_millis(100));
 
+        let pending_view = self.pending.as_ref().map(|pending| {
+            (
+                pending.request.identity.device_name.clone(),
+                pending.request.identity.device_id.clone(),
+                pending.request.identity.device_type.clone(),
+                pending.request.identity.protocol_version,
+                pending.request.fingerprint.clone(),
+            )
+        });
+
+        let mut decision = None;
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("PhoneBridge — KDE Connect pairing");
             ui.label("Live TLS pairing endpoint");
@@ -96,23 +105,23 @@ impl eframe::App for PairingDemoApp {
                 ui.colored_label(egui::Color32::RED, error);
             }
 
-            if let Some(pending) = &self.pending {
+            if let Some((name, id, device_type, protocol, fingerprint)) = &pending_view {
                 ui.add_space(10.0);
                 ui.group(|ui| {
                     ui.heading("Incoming pairing request");
-                    ui.label(format!("Name: {}", pending.request.identity.device_name));
-                    ui.label(format!("ID: {}", pending.request.identity.device_id));
-                    ui.label(format!("Type: {}", pending.request.identity.device_type));
-                    ui.label(format!("Protocol: {}", pending.request.identity.protocol_version));
-                    ui.label(format!("Certificate fingerprint: {}", pending.request.fingerprint));
+                    ui.label(format!("Name: {name}"));
+                    ui.label(format!("ID: {id}"));
+                    ui.label(format!("Type: {device_type}"));
+                    ui.label(format!("Protocol: {protocol}"));
+                    ui.label(format!("Certificate fingerprint: {fingerprint}"));
                     ui.separator();
                     ui.horizontal(|ui| {
                         if ui.button("Allow").clicked() {
-                            // The decision is sent over the same live TLS session.
-                            self.decide(PairingDecision::Accept);
+                            // Apply the decision after the immutable UI snapshot is released.
+                            decision = Some(TlsPairingDecision::Accept);
                         }
                         if ui.button("Reject").clicked() {
-                            self.decide(PairingDecision::Reject);
+                            decision = Some(TlsPairingDecision::Reject);
                         }
                     });
                 });
@@ -122,6 +131,10 @@ impl eframe::App for PairingDemoApp {
                 ui.monospace(format!("TLS endpoint: 0.0.0.0:{TLS_PAIRING_PORT}"));
             }
         });
+
+        if let Some(decision) = decision {
+            self.decide(decision);
+        }
     }
 }
 
