@@ -81,7 +81,7 @@ sealed class Message {
 
     @Serializable
     data class MediaStateData(
-        val package_name: String? = null,
+        @SerialName("package") val packageName: String? = null,
         val state: MediaPlaybackState = MediaPlaybackState.Unknown,
         val title: String? = null,
         val artist: String? = null,
