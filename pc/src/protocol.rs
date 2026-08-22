@@ -1,7 +1,7 @@
-//! Общий протокол сообщений PC <-> Android поверх TLS-соединения.
+//! Общий протокол сообщений PC <-> Android поверх WebSocket/TLS-соединения.
 //!
-//! Формат: одна JSON-строка на сообщение, разделитель — '\n' (newline-delimited JSON).
-//! Control-plane содержит только звонки и управление медиа. Аудиопоток сюда не входит.
+//! Формат: одна JSON-строка на сообщение, разделитель — '\n'.
+//! Control-plane содержит только звонки, медиа и SMS. Аудиопоток сюда не входит.
 
 use serde::{Deserialize, Serialize};
 
@@ -38,6 +38,37 @@ pub enum Message {
         artist: Option<String>,
         album: Option<String>,
     },
+    /// Android -> PC: входящее SMS.
+    #[serde(rename = "sms_received")]
+    SmsReceived {
+        address: String,
+        body: String,
+        timestamp: i64,
+    },
+    /// PC -> Android: отправить SMS.
+    #[serde(rename = "sms_send")]
+    SmsSend {
+        address: String,
+        body: String,
+    },
+    /// PC -> Android: запросить последние входящие SMS.
+    #[serde(rename = "sms_list")]
+    SmsList,
+    /// Android -> PC: один элемент истории SMS.
+    #[serde(rename = "sms_item")]
+    SmsItem {
+        id: String,
+        address: String,
+        body: String,
+        timestamp: i64,
+    },
+    /// Android -> PC: конец ответа на sms_list.
+    #[serde(rename = "sms_list_end")]
+    SmsListEnd { count: u32 },
+    #[serde(rename = "sms_sent")]
+    SmsSent { address: String, body: String },
+    #[serde(rename = "sms_error")]
+    SmsError { error: String },
     PhoneBluetoothStatus { hfp_calls_toggle_enabled: bool },
     PcBluetoothStatus { hfp_supported: HfpSupport },
     Error { message: String },
