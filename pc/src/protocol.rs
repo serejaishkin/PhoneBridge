@@ -110,3 +110,29 @@ impl Message {
         Ok(serde_json::from_str(line.trim_end())?)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sms_send_round_trips() {
+        let message = Message::SmsSend {
+            address: "+79991234567".into(),
+            body: "hello".into(),
+        };
+        let line = message.to_line().unwrap();
+        assert_eq!(
+            line,
+            "{\"type\":\"sms_send\",\"data\":{\"address\":\"+79991234567\",\"body\":\"hello\"}}\n"
+        );
+        let decoded = Message::from_line(&line).unwrap();
+        match decoded {
+            Message::SmsSend { address, body } => {
+                assert_eq!(address, "+79991234567");
+                assert_eq!(body, "hello");
+            }
+            other => panic!("unexpected message: {other:?}"),
+        }
+    }
+}
