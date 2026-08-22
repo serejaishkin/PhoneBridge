@@ -3,20 +3,12 @@ package com.phonebridge2.app.pairing
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-/**
- * Зеркало pc/src/protocol.rs::Message. Формат сериализации должен совпадать
- * byte-in-byte с Rust-стороной (serde с tag="type", content="data") —
- * при любом изменении полей менять ОБА файла синхронно, иначе PC и телефон
- * перестанут понимать друг друга молча (без явной ошибки).
- */
+/** Зеркало pc/src/protocol.rs::Message. */
 @Serializable
 sealed class Message {
-
     @Serializable
     @SerialName("Hello")
-    data class Hello(
-        val data: HelloData
-    ) : Message()
+    data class Hello(val data: HelloData) : Message()
 
     @Serializable
     data class HelloData(
@@ -68,17 +60,68 @@ sealed class Message {
     object CallDecline : Message()
 
     @Serializable
+    @SerialName("MediaCommand")
+    data class MediaCommand(val data: MediaCommandData) : Message()
+
+    @Serializable
+    data class MediaCommandData(val command: MediaCommandType)
+
+    @Serializable
+    enum class MediaCommandType {
+        Play,
+        Pause,
+        PlayPause,
+        Next,
+        Previous
+    }
+
+    @Serializable
+    @SerialName("MediaState")
+    data class MediaState(val data: MediaStateData) : Message()
+
+    @Serializable
+    data class MediaStateData(
+        val package_name: String? = null,
+        val state: MediaPlaybackState = MediaPlaybackState.Unknown,
+        val title: String? = null,
+        val artist: String? = null,
+        val album: String? = null
+    )
+
+    @Serializable
+    enum class MediaPlaybackState {
+        Playing,
+        Paused,
+        Buffering,
+        None,
+        Unknown
+    }
+
+    @Serializable
+    @SerialName("PhoneBluetoothStatus")
+    data class PhoneBluetoothStatus(val data: PhoneBluetoothStatusData) : Message()
+
+    @Serializable
+    data class PhoneBluetoothStatusData(val hfp_calls_toggle_enabled: Boolean)
+
+    @Serializable
+    @SerialName("PcBluetoothStatus")
+    data class PcBluetoothStatus(val data: PcBluetoothStatusData) : Message()
+
+    @Serializable
+    data class PcBluetoothStatusData(val hfp_supported: HfpSupport)
+
+    @Serializable
+    enum class HfpSupport {
+        Supported,
+        Unsupported,
+        Unknown
+    }
+
+    @Serializable
     @SerialName("Error")
     data class Error(val data: ErrorData) : Message()
 
     @Serializable
     data class ErrorData(val message: String)
 }
-
-/**
- * NOTE: реальный serde-тег на Rust-стороне сериализует enum-варианты без полей
- * (Ping/Pong/CallEnded/...) как {"type":"Ping"} БЕЗ поля "data". kotlinx.serialization
- * с polymorphic sealed class по умолчанию сериализует object как {"type":"Ping"} —
- * это должно совпасть, но перед первым реальным подключением стоит явно сверить
- * JSON на обеих сторонах юнит-тестом (TODO для Kimi), а не полагаться на "похоже".
- */
