@@ -11,11 +11,12 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.phonebridge.app.call.CallManager
 import com.phonebridge.app.discovery.BleAdvertiser
+import com.phonebridge.app.media.MediaControllerBridge
 import com.phonebridge.app.service.AudioCaptureService
 import com.phonebridge.app.service.AudioPlaybackService
 import com.phonebridge.app.ui.theme.PhoneBridgeTheme
@@ -23,6 +24,7 @@ import com.phonebridge.app.ui.theme.PhoneBridgeTheme
 class MainActivity : ComponentActivity() {
 
     private val bleAdvertiser by lazy { BleAdvertiser(this) }
+    private val callManager by lazy { CallManager(this) }
 
     private val projectionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -66,6 +68,7 @@ class MainActivity : ComponentActivity() {
                         onStopCapture = {
                             stopService(Intent(this, AudioCaptureService::class.java))
                             stopService(Intent(this, AudioPlaybackService::class.java))
+                            callManager.stop()
                             bleAdvertiser.stop()
                         }
                     )
@@ -80,6 +83,8 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.INTERNET,
             Manifest.permission.ACCESS_WIFI_STATE,
             Manifest.permission.ACCESS_NETWORK_STATE,
+            Manifest.permission.READ_PHONE_STATE,
+            Manifest.permission.ANSWER_PHONE_CALLS,
             Manifest.permission.BLUETOOTH,
             Manifest.permission.BLUETOOTH_ADMIN,
         )
@@ -95,13 +100,19 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startServices() {
-        // Start PC mic playback service
+        // Start the call/control channel. The same signaling connection also
+        // carries media_* commands from the PC.
+        callManager.start()
+        MediaControllerBridge.init(this)
+
+        // Start PC mic playback service.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(Intent(this, AudioPlaybackService::class.java))
         } else {
             startService(Intent(this, AudioPlaybackService::class.java))
         }
-        // Start BLE advertising
+
+        // Start BLE advertising.
         bleAdvertiser.start()
     }
 
@@ -111,6 +122,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        callManager.stop()
         bleAdvertiser.stop()
         super.onDestroy()
     }
@@ -131,7 +143,7 @@ fun MainScreen(onStartCapture: () -> Unit, onStopCapture: () -> Unit) {
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "Turn your PC into a wireless headset",
+            text = "Call and media control bridge",
             style = MaterialTheme.typography.bodyMedium
         )
         Spacer(modifier = Modifier.height(32.dp))
