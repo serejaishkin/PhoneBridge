@@ -43,9 +43,9 @@ class CallManager(private val context: Context) {
         }
     }
 
-    fun start() {
+    fun start(host: String = "192.168.137.1") {
         telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE)
-        signalingClient.connect(SignalingClient.DEFAULT_URL)
+        signalingClient.connect("tls://$host:17591")
         MediaControllerBridge.refresh()
     }
 
