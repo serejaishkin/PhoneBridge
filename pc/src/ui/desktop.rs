@@ -30,15 +30,22 @@ impl PhoneBridgeApp {
 impl eframe::App for PhoneBridgeApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.request_repaint_after(std::time::Duration::from_millis(250));
-        let state = self.state.lock().unwrap();
-        egui::TopBottomPanel::top("top").show(ctx, |ui| { ui.horizontal(|ui| { ui.heading("PhoneBridge"); ui.separator(); ui.label(if state.connected { format!("● {}", state.peer_name) } else { "○ Телефон не подключён".into() }); ui.separator(); ui.label(format!("HFP: {:?}", state.hfp)); }); });
+
+        // Snapshot shared state before entering egui closures. Holding the MutexGuard
+        // while a closure mutably borrows `self` causes E0500.
+        let (connected, peer_name, hfp, caller_name, caller_number, ringing, sms_notice) = {
+            let state = self.state.lock().unwrap();
+            (state.connected, state.peer_name.clone(), state.hfp, state.caller_name.clone(), state.caller_number.clone(), state.ringing, state.sms_notice.clone())
+        };
+
+        egui::TopBottomPanel::top("top").show(ctx, |ui| { ui.horizontal(|ui| { ui.heading("PhoneBridge"); ui.separator(); ui.label(if connected { format!("● {}", peer_name) } else { "○ Телефон не подключён".into() }); ui.separator(); ui.label(format!("HFP: {:?}", hfp)); }); });
         egui::SidePanel::left("calls").resizable(false).show(ctx, |ui| {
             ui.heading("Звонки"); ui.separator();
-            if state.ringing { ui.label(if state.caller_name.is_empty() { "Входящий звонок" } else { &state.caller_name }); ui.label(&state.caller_number); ui.horizontal(|ui| { if ui.button("Ответить").clicked() { self.send(Message::CallAnswer); } if ui.button("Отклонить").clicked() { self.send(Message::CallDecline); } }); } else { ui.label("Нет активного звонка"); }
+            if ringing { ui.label(if caller_name.is_empty() { "Входящий звонок" } else { &caller_name }); ui.label(&caller_number); ui.horizontal(|ui| { if ui.button("Ответить").clicked() { self.send(Message::CallAnswer); } if ui.button("Отклонить").clicked() { self.send(Message::CallDecline); } }); } else { ui.label("Нет активного звонка"); }
             ui.separator(); ui.heading("Медиа"); ui.horizontal(|ui| { if ui.button("▶/Ⅱ").clicked() { self.send(Message::MediaCommand { command: MediaCommand::PlayPause }); } if ui.button("⏮").clicked() { self.send(Message::MediaCommand { command: MediaCommand::Previous }); } if ui.button("⏭").clicked() { self.send(Message::MediaCommand { command: MediaCommand::Next }); } });
         });
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("SMS"); if !state.sms_notice.is_empty() { ui.label(&state.sms_notice); } drop(state);
+            ui.heading("SMS"); if !sms_notice.is_empty() { ui.label(&sms_notice); }
             let messages = self.runtime.block_on(async { self.sms_store.lock().await.all() });
             egui::ScrollArea::vertical().max_height(350.0).show(ui, |ui| { for (i, sms) in messages.iter().enumerate() { if ui.selectable_label(self.selected_sms == Some(i), format!("{} — {}", sms.address, sms.body)).clicked() { self.selected_sms = Some(i); self.selected_address = sms.address.clone(); } } });
             ui.separator(); ui.horizontal(|ui| { ui.label("Номер:"); ui.text_edit_singleline(&mut self.selected_address); }); ui.text_edit_multiline(&mut self.sms_body);
