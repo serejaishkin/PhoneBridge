@@ -11,12 +11,19 @@ class SmsReceiver : BroadcastReceiver() {
         if (intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION) return
 
         val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
-        for (message in messages) {
-            val address = message.originatingAddress.orEmpty()
-            val body = message.messageBody.orEmpty()
-            if (address.isNotBlank() && body.isNotBlank()) {
-                SmsBridge.init(context)
-                SmsBridge.publishReceived(address, body, message.timestampMillis)
+        if (messages.isEmpty()) return
+
+        // A long SMS may arrive as multiple PDUs. Reassemble it before sending
+        // it to the PC so the desktop never sees duplicate partial messages.
+        val grouped = messages
+            .filter { !it.originatingAddress.isNullOrBlank() }
+            .groupBy { it.originatingAddress.orEmpty() to it.timestampMillis }
+
+        SmsBridge.init(context)
+        grouped.forEach { (key, parts) ->
+            val body = parts.joinToString(separator = "") { it.messageBody.orEmpty() }
+            if (body.isNotBlank()) {
+                SmsBridge.publishReceived(key.first, body, key.second)
             }
         }
     }
