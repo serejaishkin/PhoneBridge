@@ -18,7 +18,17 @@ class CallManager(private val context: Context) {
         when (type) {
             "call_answer" -> answerCall()
             "call_decline" -> endCall()
-            "media_command" -> MediaControllerBridge.handleCommand(data["command"]?.let { "media_${it.lowercase()}" } ?: "")
+            "media_command" -> {
+                val command = when (data["command"]) {
+                    "Play" -> "media_play"
+                    "Pause" -> "media_pause"
+                    "PlayPause" -> "media_play_pause"
+                    "Next" -> "media_next"
+                    "Previous" -> "media_previous"
+                    else -> ""
+                }
+                if (command.isNotEmpty()) MediaControllerBridge.handleCommand(command)
+            }
             "sms_send" -> SmsBridge.sendFromCommand(data)
             "sms_list" -> SmsBridge.publishRecent()
         }
@@ -27,9 +37,7 @@ class CallManager(private val context: Context) {
     private val phoneStateListener = object : PhoneStateListener() {
         override fun onCallStateChanged(state: Int, phoneNumber: String?) {
             when (state) {
-                TelephonyManager.CALL_STATE_RINGING -> signalingClient.sendEvent(
-                    "incoming_call", mapOf("number" to (phoneNumber ?: "Unknown"))
-                )
+                TelephonyManager.CALL_STATE_RINGING -> signalingClient.sendEvent("incoming_call", mapOf("number" to (phoneNumber ?: "Unknown")))
                 TelephonyManager.CALL_STATE_IDLE -> signalingClient.sendEvent("call_ended", emptyMap())
             }
         }
@@ -38,7 +46,6 @@ class CallManager(private val context: Context) {
     fun start() {
         telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE)
         signalingClient.connect(SignalingClient.DEFAULT_URL)
-        // Give the PC an initial media snapshot as soon as the control channel opens.
         MediaControllerBridge.refresh()
     }
 
@@ -50,20 +57,12 @@ class CallManager(private val context: Context) {
     fun answerCall() {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.ANSWER_PHONE_CALLS) != PackageManager.PERMISSION_GRANTED) return
         val telecom = context.getSystemService(Context.TELECOM_SERVICE) as TelecomManager
-        try {
-            telecom.acceptRingingCall()
-        } catch (_: SecurityException) {
-            // OEM/default-dialer restrictions can still reject this operation.
-        }
+        runCatching { telecom.acceptRingingCall() }
     }
 
     fun endCall() {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.ANSWER_PHONE_CALLS) != PackageManager.PERMISSION_GRANTED) return
         val telecom = context.getSystemService(Context.TELECOM_SERVICE) as TelecomManager
-        try {
-            telecom.endCall()
-        } catch (_: SecurityException) {
-            // OEM/default-dialer restrictions can still reject this operation.
-        }
+        runCatching { telecom.endCall() }
     }
 }
