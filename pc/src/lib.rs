@@ -1,6 +1,7 @@
 pub mod audio;
 pub mod network;
 pub mod protocol;
+pub mod sms;
 pub mod shairport;
 pub mod ui;
 pub mod config;
