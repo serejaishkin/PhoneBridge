@@ -2,8 +2,6 @@ package com.phonebridge.app
 
 import android.Manifest
 import android.content.Intent
-import android.media.projection.MediaProjectionManager
-import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Toast
@@ -12,49 +10,25 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.phonebridge.app.call.CallManager
 import com.phonebridge.app.discovery.BleAdvertiser
 import com.phonebridge.app.media.MediaControllerBridge
-import com.phonebridge.app.service.AudioCaptureService
-import com.phonebridge.app.service.AudioPlaybackService
 import com.phonebridge.app.sms.SmsBridge
 import com.phonebridge.app.ui.theme.PhoneBridgeTheme
 
 class MainActivity : ComponentActivity() {
-
     private val bleAdvertiser by lazy { BleAdvertiser(this) }
     private val callManager by lazy { CallManager(this) }
-
-    private val projectionLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == RESULT_OK && result.data != null) {
-            val intent = Intent(this, AudioCaptureService::class.java).apply {
-                putExtra("code", result.resultCode)
-                putExtra("data", result.data)
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(intent)
-            } else {
-                startService(intent)
-            }
-            Toast.makeText(this, "Audio capture started", Toast.LENGTH_SHORT).show()
-        }
-    }
 
     private val permissionsLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        val allGranted = permissions.entries.all { it.value }
-        if (allGranted) {
-            startMediaProjection()
-            startServices()
-        } else {
-            Toast.makeText(this, "Permissions required", Toast.LENGTH_LONG).show()
-        }
+        if (permissions.entries.all { it.value }) startBridge()
+        else Toast.makeText(this, "Нужны разрешения для звонков и SMS", Toast.LENGTH_LONG).show()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -62,30 +36,22 @@ class MainActivity : ComponentActivity() {
         SmsBridge.init(this)
         setContent {
             PhoneBridgeTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
+                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     MainScreen(
-                        onStartCapture = { requestPermissions() },
-                        onEnableMediaAccess = {
-                            startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-                        },
-                        onStopCapture = {
-                            stopService(Intent(this, AudioCaptureService::class.java))
-                            stopService(Intent(this, AudioPlaybackService::class.java))
-                            callManager.stop()
-                            bleAdvertiser.stop()
-                        }
+                        onStart = { host -> requestPermissions(host) },
+                        onEnableMediaAccess = { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
+                        onStop = { stopBridge() }
                     )
                 }
             }
         }
     }
 
-    private fun requestPermissions() {
-        val permissions = mutableListOf(
-            Manifest.permission.RECORD_AUDIO,
+    private var pendingHost = "192.168.137.1"
+
+    private fun requestPermissions(host: String) {
+        pendingHost = host.trim().ifBlank { "192.168.137.1" }
+        permissionsLauncher.launch(arrayOf(
             Manifest.permission.INTERNET,
             Manifest.permission.ACCESS_WIFI_STATE,
             Manifest.permission.ACCESS_NETWORK_STATE,
@@ -93,39 +59,22 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.ANSWER_PHONE_CALLS,
             Manifest.permission.READ_SMS,
             Manifest.permission.RECEIVE_SMS,
-            Manifest.permission.SEND_SMS,
-            Manifest.permission.BLUETOOTH,
-            Manifest.permission.BLUETOOTH_ADMIN,
-        )
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            permissions.add(Manifest.permission.BLUETOOTH_ADVERTISE)
-            permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
-            permissions.add(Manifest.permission.BLUETOOTH_SCAN)
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
-        }
-        permissionsLauncher.launch(permissions.toTypedArray())
+            Manifest.permission.SEND_SMS
+        ))
     }
 
-    private fun startServices() {
-        // One signaling connection carries calls, media commands and SMS commands.
-        callManager.start()
+    private fun startBridge() {
+        callManager.start(pendingHost)
         MediaControllerBridge.init(this)
         SmsBridge.init(this)
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(Intent(this, AudioPlaybackService::class.java))
-        } else {
-            startService(Intent(this, AudioPlaybackService::class.java))
-        }
-
         bleAdvertiser.start()
+        Toast.makeText(this, "PhoneBridge подключается к $pendingHost", Toast.LENGTH_SHORT).show()
     }
 
-    private fun startMediaProjection() {
-        val manager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        projectionLauncher.launch(manager.createScreenCaptureIntent())
+    private fun stopBridge() {
+        callManager.stop()
+        bleAdvertiser.stop()
+        Toast.makeText(this, "PhoneBridge остановлен", Toast.LENGTH_SHORT).show()
     }
 
     override fun onDestroy() {
@@ -136,38 +85,32 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun MainScreen(
-    onStartCapture: () -> Unit,
+private fun MainScreen(
+    onStart: (String) -> Unit,
     onEnableMediaAccess: () -> Unit,
-    onStopCapture: () -> Unit
+    onStop: () -> Unit
 ) {
+    var host by remember { mutableStateOf("192.168.137.1") }
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
+        Modifier.fillMaxSize().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text(
-            text = "PhoneBridge",
-            style = MaterialTheme.typography.headlineLarge
+        Text("PhoneBridge", style = MaterialTheme.typography.headlineLarge)
+        Spacer(Modifier.height(8.dp))
+        Text("Звонки • Медиа • SMS", style = MaterialTheme.typography.bodyMedium)
+        Spacer(Modifier.height(24.dp))
+        OutlinedTextField(
+            value = host,
+            onValueChange = { host = it },
+            label = { Text("IP компьютера") },
+            singleLine = true
         )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = "Call, media and SMS bridge",
-            style = MaterialTheme.typography.bodyMedium
-        )
-        Spacer(modifier = Modifier.height(32.dp))
-        Button(onClick = onStartCapture) {
-            Text("Start Bridge")
-        }
-        Spacer(modifier = Modifier.height(12.dp))
-        OutlinedButton(onClick = onEnableMediaAccess) {
-            Text("Enable media access")
-        }
-        Spacer(modifier = Modifier.height(12.dp))
-        OutlinedButton(onClick = onStopCapture) {
-            Text("Stop")
-        }
+        Spacer(Modifier.height(12.dp))
+        Button(onClick = { onStart(host) }) { Text("Подключить") }
+        Spacer(Modifier.height(12.dp))
+        OutlinedButton(onClick = onEnableMediaAccess) { Text("Доступ к медиа") }
+        Spacer(Modifier.height(12.dp))
+        OutlinedButton(onClick = onStop) { Text("Остановить") }
     }
 }
