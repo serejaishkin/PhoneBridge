@@ -5,6 +5,7 @@ import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -65,6 +66,9 @@ class MainActivity : ComponentActivity() {
                 ) {
                     MainScreen(
                         onStartCapture = { requestPermissions() },
+                        onEnableMediaAccess = {
+                            startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                        },
                         onStopCapture = {
                             stopService(Intent(this, AudioCaptureService::class.java))
                             stopService(Intent(this, AudioPlaybackService::class.java))
@@ -100,19 +104,16 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startServices() {
-        // Start the call/control channel. The same signaling connection also
-        // carries media_* commands from the PC.
+        // One signaling connection carries both call events and media commands.
         callManager.start()
         MediaControllerBridge.init(this)
 
-        // Start PC mic playback service.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(Intent(this, AudioPlaybackService::class.java))
         } else {
             startService(Intent(this, AudioPlaybackService::class.java))
         }
 
-        // Start BLE advertising.
         bleAdvertiser.start()
     }
 
@@ -129,7 +130,11 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun MainScreen(onStartCapture: () -> Unit, onStopCapture: () -> Unit) {
+fun MainScreen(
+    onStartCapture: () -> Unit,
+    onEnableMediaAccess: () -> Unit,
+    onStopCapture: () -> Unit
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -150,7 +155,11 @@ fun MainScreen(onStartCapture: () -> Unit, onStopCapture: () -> Unit) {
         Button(onClick = onStartCapture) {
             Text("Start Bridge")
         }
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(12.dp))
+        OutlinedButton(onClick = onEnableMediaAccess) {
+            Text("Enable media access")
+        }
+        Spacer(modifier = Modifier.height(12.dp))
         OutlinedButton(onClick = onStopCapture) {
             Text("Stop")
         }
