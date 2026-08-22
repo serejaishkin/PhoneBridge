@@ -20,6 +20,7 @@ import com.phonebridge.app.discovery.BleAdvertiser
 import com.phonebridge.app.media.MediaControllerBridge
 import com.phonebridge.app.service.AudioCaptureService
 import com.phonebridge.app.service.AudioPlaybackService
+import com.phonebridge.app.sms.SmsBridge
 import com.phonebridge.app.ui.theme.PhoneBridgeTheme
 
 class MainActivity : ComponentActivity() {
@@ -58,6 +59,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        SmsBridge.init(this)
         setContent {
             PhoneBridgeTheme {
                 Surface(
@@ -89,6 +91,9 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.ACCESS_NETWORK_STATE,
             Manifest.permission.READ_PHONE_STATE,
             Manifest.permission.ANSWER_PHONE_CALLS,
+            Manifest.permission.READ_SMS,
+            Manifest.permission.RECEIVE_SMS,
+            Manifest.permission.SEND_SMS,
             Manifest.permission.BLUETOOTH,
             Manifest.permission.BLUETOOTH_ADMIN,
         )
@@ -104,9 +109,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startServices() {
-        // One signaling connection carries both call events and media commands.
+        // One signaling connection carries calls, media commands and SMS commands.
         callManager.start()
         MediaControllerBridge.init(this)
+        SmsBridge.init(this)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(Intent(this, AudioPlaybackService::class.java))
@@ -148,7 +154,7 @@ fun MainScreen(
         )
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "Call and media control bridge",
+            text = "Call, media and SMS bridge",
             style = MaterialTheme.typography.bodyMedium
         )
         Spacer(modifier = Modifier.height(32.dp))
