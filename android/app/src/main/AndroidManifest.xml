@@ -33,9 +33,7 @@
             </intent-filter>
         </activity>
 
-        <!-- InCallService: даёт приложению доступ к управлению активным звонком
-             (answer/reject) — регистрируется как "phone account" / доп. UI,
-             НЕ становится дефолтным дозвонщиком (это не нужно для нашей архитектуры). -->
+        <!-- InCallService: управление активным телефонным звонком. -->
         <service
             android:name=".call.BridgeInCallService"
             android:permission="android.permission.BIND_INCALL_SERVICE"
@@ -45,6 +43,19 @@
                 android:value="false" />
             <intent-filter>
                 <action android:name="android.telecom.InCallService" />
+            </intent-filter>
+        </service>
+
+        <!-- Доступ к активным MediaSession для управления музыкой/видео.
+             Пользователь должен вручную включить PhoneBridge в
+             Настройки → Доступ к уведомлениям. -->
+        <service
+            android:name=".media.MediaNotificationListenerService"
+            android:label="PhoneBridge media control"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
 
