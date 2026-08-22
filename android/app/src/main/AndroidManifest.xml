@@ -1,19 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Discovery/pairing/протокол поверх Wi-Fi -->
+    <!-- Discovery/pairing/protocol over Wi-Fi -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
 
-    <!-- Control-plane для звонков: узнать о входящем звонке и номере,
-         ответить/сбросить через InCallService. Звук звонка сюда НЕ входит —
-         он идёт нативным Bluetooth HFP, для чего никаких доп. permission
-         от приложения не требуется (это делает сама ОС). -->
+    <!-- Calls -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
 
-    <!-- Медиа-аудио (не звонки): захват системного плейбэка через MediaProjection. -->
+    <!-- SMS read/send -->
+    <uses-permission android:name="android.permission.READ_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.SEND_SMS" />
+
+    <!-- Media -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -33,7 +35,6 @@
             </intent-filter>
         </activity>
 
-        <!-- InCallService: управление активным телефонным звонком. -->
         <service
             android:name=".call.BridgeInCallService"
             android:permission="android.permission.BIND_INCALL_SERVICE"
@@ -46,9 +47,6 @@
             </intent-filter>
         </service>
 
-        <!-- Доступ к активным MediaSession для управления музыкой/видео.
-             Пользователь должен вручную включить PhoneBridge в
-             Настройки → Доступ к уведомлениям. -->
         <service
             android:name=".media.MediaNotificationListenerService"
             android:label="PhoneBridge media control"
@@ -58,6 +56,15 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <receiver
+            android:name=".sms.SmsReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter android:priority="999">
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
 
     </application>
 </manifest>
