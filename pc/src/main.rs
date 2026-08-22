@@ -2,11 +2,13 @@ mod call;
 mod discovery;
 mod pairing;
 mod protocol;
+mod sms;
 mod ui;
 
 use pairing::identity::Identity;
 use pairing::server::PairingServer;
 use pairing::trust::TrustStore;
+use sms::{SmsController, SmsStore};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use ui::{HeadlessUi, UiBackend};
@@ -27,27 +29,28 @@ async fn main() -> anyhow::Result<()> {
     let trust_store = Arc::new(Mutex::new(TrustStore::load(&identity_dir)?));
     let shared_state = call::SharedState::new();
     let ui: Arc<dyn UiBackend> = Arc::new(HeadlessUi);
+    let sms_controller = SmsController::new();
+    let sms_store = Arc::new(Mutex::new(SmsStore::new()));
 
-    // Проверка HFP-адаптера — сейчас всегда Unknown (см. call::check_hfp_support),
-    // но статус уже прокидывается в UI, чтобы дальше просто подключить реальную детекцию.
     let hfp_status = call::check_hfp_support().await;
     *shared_state.hfp_support.lock().await = hfp_status;
     ui.update_hfp_status(hfp_status).await;
 
-    let pairing_server = PairingServer::new(identity.clone(), trust_store.clone())?;
+    let pairing_server = PairingServer::new(
+        identity.clone(),
+        trust_store.clone(),
+        ui.clone(),
+        sms_controller.clone(),
+        sms_store.clone(),
+    )?;
     let pairing_task = tokio::spawn(pairing_server.run());
-
     let discovery_task = tokio::spawn(discovery::run_broadcaster(identity.clone()));
 
-    log::info!("phonebridge2 PC daemon started");
+    log::info!("phonebridge2 PC daemon started; SMS control ready");
 
     tokio::select! {
-        res = pairing_task => {
-            log::error!("pairing server task exited: {:?}", res);
-        }
-        res = discovery_task => {
-            log::error!("discovery task exited: {:?}", res);
-        }
+        res = pairing_task => log::error!("pairing server task exited: {:?}", res),
+        res = discovery_task => log::error!("discovery task exited: {:?}", res),
     }
 
     Ok(())
