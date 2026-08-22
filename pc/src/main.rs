@@ -12,6 +12,7 @@ use sms::{SmsController, SmsStore};
 use std::sync::{Arc, Mutex};
 use tokio::sync::Mutex as TokioMutex;
 use ui::desktop::{DesktopState, DesktopUi, PhoneBridgeApp};
+use ui::UiBackend;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
