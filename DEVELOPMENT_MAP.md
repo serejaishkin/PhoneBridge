@@ -1,224 +1,109 @@
 # PhoneBridge Development Map
 
-Last updated: 2026-08-21
-
-## Goal
-PhoneBridge is a local-first Android companion for **Windows, macOS and Linux**. The PC core remains platform-neutral; OS-specific integrations live behind platform interfaces.
+Last updated: 2026-08-25
 
 ## Current branch
 `feature/tls-pairing-v1`
 
-## Stabilization status
-The repository is currently in a compile/API stabilization pass. Static inspection found a Windows RFCOMM bridge mismatch where the bridge called the shared TLS acceptor with `Identity` even though the TLS boundary accepts DER certificate/key bytes. This was corrected to use `Identity.cert_der` and parse `Identity.key_pem` through `rustls_pemfile`. No build or test result is claimed until an actual runner executes them.
+## Current state
+GUI-to-session pairing command plumbing is now represented explicitly by `BasicUi::UiCommand` and `ControlSession::handle_ui_command()`. The next required step is runtime ownership/writer integration and then the stabilization build pass. No build/test result is claimed.
 
 ## Architecture
 ```text
 Android
-  ├── DiscoveryClient / PeerRegistry
+  ├── Discovery / PeerRegistry
   ├── TLS / FramedChannel
   ├── Pairing / TrustStore / PairingManager
-  ├── ConnectionManager / authenticated handshake / heartbeat / reconnect
-  ├── EndpointStore / PeerConnectionStore / PreferredRouteStore / RoutePlanner
-  ├── PairingScreen / PairingViewModel
-  └── CallManager / InCallService / CallBridge
+  ├── ConnectionManager / reconnect / heartbeat
+  ├── EndpointStore / PreferredRouteStore / RoutePlanner
+  └── Pairing UI / CallBridge
           │
           ▼
 PC Rust Core
   ├── Discovery / UDP LAN + hotspot
-  ├── PeerRegistry / TTL
   ├── RouteMemory / RouteStore / ConnectionCoordinator
-  ├── Common ByteStream transport boundary
-  ├── Transport-independent TLS acceptor boundary
-  ├── TLS control plane
-  ├── Protocol
-  ├── Identity / TrustStore / PairingSession
-  ├── PairingCommandHub ← Desktop GUI commands
-  ├── CallController
-  ├── Iced Desktop GUI / dashboard / pairing / diagnostics
+  ├── Common AsyncRead/AsyncWrite transport boundary
+  ├── TLS acceptor
+  ├── Protocol / ControlSession
+  ├── PairingSession / TrustStore
+  ├── Desktop UiState / UiCommand
+  ├── Desktop GUI
   └── Platform
-        ├── Bluetooth stream contract
-        ├── Windows WinRT RFCOMM backend
-        ├── Windows StreamSocket → Tokio ByteStream bridge
-        ├── Windows RFCOMM → TLS → shared ControlSession bridge
-        ├── Linux BlueZ backend [planned]
-        ├── macOS IOBluetooth backend [planned]
-        └── HfpBackend
-             ├── Windows
-             ├── macOS
-             └── Linux
+        ├── Windows WinRT RFCOMM
+        ├── Linux BlueZ [planned]
+        └── macOS IOBluetooth [planned]
 ```
 
-## Protocol v1
-- TLS TCP `17591`.
-- UDP discovery `17592`.
-- Newline-delimited JSON.
-- Pairing is bound to persistent device identity fingerprint plus human confirmation code.
-- LAN discovery never authenticates a device.
-- `Ping` / `Pong` heartbeat frames.
-- `Disconnect { reason }` graceful close frame.
-- Android does not enter `CONNECTED` until a trusted `HelloAck` or successful `PairResult` is received.
-- `PairApprove` / `PairReject` are explicit desktop-side pairing decision messages.
+## Pairing flow
+```text
+Android Hello
+   ↓
+PC PairingSession
+   ↓
+PairChallenge
+   ↓
+Desktop GUI
+   ↓
+Allow / Reject
+   ↓
+UiCommand channel
+   ↓
+ControlSession::handle_ui_command()
+   ↓
+PairApprove / PairReject
+   ↓
+TLS writer
+   ↓
+Android
+   ↓
+TrustStore
+```
 
 ## Completed
-- PC TLS server and Android TLS client foundations.
-- Canonical newline-delimited framing on Rust/Android.
-- Persistent identity and TrustStore foundations.
-- Fingerprint-bound pairing state machine.
-- Trusted-device fast path at PC and Android session layers.
-- Android first-frame `HelloAck` validation.
-- Android pre-authentication command gating.
-- Pre-authentication command rejection on PC.
-- Transport handshake timeout and idle timeout.
-- Android reconnecting ConnectionManager with serialized writes.
-- Android heartbeat every 15 seconds while connected.
-- Android automatic `Pong` response.
-- Android graceful `Disconnect` handling.
-- PC graceful `Disconnect` handling.
-- PC timeout sends `Disconnect` before socket shutdown.
-- Android discovery peer model/registry.
-- Android persistent PC endpoint store.
-- Android selected-PC persistence.
-- Android deterministic Wi-Fi/hotspot/Bluetooth-PAN route planner.
-- Android preferred transport persistence and route prioritization.
-- Android selected-PC → live ConnectionManager integration.
-- Android pairing wizard state model and Compose confirmation screen.
-- Android main GUI wired to discovered PCs, selected PC persistence and live pairing state.
-- Android explicit Forget paired PC control.
-- Android mirrors explicit PC pairing approval/rejection messages.
-- Automatic multi-route reconnect coordinator foundation.
-- PC Bluetooth native stream transport contract for RFCOMM/L2CAP.
-- PC per-OS Bluetooth backend selector for Windows/Linux/macOS.
-- PC preferred-route memory and route ordering.
-- PC route persistence primitive.
-- PC multi-route ConnectionCoordinator foundation for TCP routes.
-- PC ConnectionCoordinator can load persisted route preference and persist it only after explicit authenticated-session confirmation.
-- Common async ByteStream boundary for all transports.
-- Windows WinRT RFCOMM discovery and StreamSocket connect foundation.
-- Windows native RFCOMM transport module is exposed through the platform layer.
-- Windows StreamSocket has a Tokio duplex bridge implementing the common byte-stream contract.
-- Transport-independent PC TLS server acceptor boundary using tokio-rustls.
-- TLS handshake timeout is enforced at the transport boundary.
-- Cross-platform Iced desktop GUI with dashboard, pairing wizard and diagnostics views.
-- Desktop GUI launches on its own thread so the Tokio daemon is not blocked.
-- PC pairing server emits live pairing challenge/result events to the shared UI backend.
-- PC protocol and ControlSession accept explicit pairing approve/reject operations.
-- Desktop GUI contains Allow/Reject/Forget controls and exposes their UI events.
-- Desktop GUI commands are routed to the live connection by `PairingCommandHub`.
-- Live PC pairing session handles desktop Allow/Reject commands and persists trust only after successful approval.
-- Desktop Forget command revokes PC trust and closes the active session.
-- `ConnectionManager` accepts any TLS stream over the common Tokio AsyncRead/AsyncWrite boundary.
-- PC authenticated session entry point is transport-generic: `serve_tls_stream()` accepts any Tokio AsyncRead/AsyncWrite TLS stream.
-- Windows incoming RFCOMM listener bridge converts accepted sockets to the common byte stream, performs TLS handshake and enters the shared `serve_tls_stream()` pairing/session path.
-- Windows RFCOMM bridge uses the shared TLS boundary with DER certificate/key material rather than duplicating TLS configuration.
-- PC heartbeat is emitted only after authentication in the authenticated session path.
-- PC outbound pairing/GUI messages continue through the serialized session writer.
-- PC discovery peer registry with TTL.
-- PC CallController and Android CallManager/CallBridge/InCallService foundation.
-- Dedicated Windows/Linux/macOS HFP backend boundaries.
+- Persistent device identity and fingerprint-bound trust.
+- Pairing short-code verification.
+- Android pairing wizard and Forget action.
+- PC pairing challenge/result UI state.
+- Desktop Allow / Reject / Forget controls.
+- `BasicUi::UiCommand` channel for pairing decisions.
+- `ControlSession::handle_ui_command()` boundary for applying desktop commands.
+- Android authenticated reconnect and preferred route persistence.
+- PC route persistence only after authenticated session.
+- Common PC async byte-stream boundary.
+- Transport-independent TLS acceptor.
+- Windows WinRT RFCOMM discovery/connect foundation.
+- Windows RFCOMM → common byte-stream/TLS source-code bridge foundation.
 
-## P0 — connection foundation
-- [ ] Move `HelloAck` construction completely into ControlSession.
-- [x] Complete trusted-device fast path on Android.
-- [x] Reject stale/mismatched pairing state.
-- [x] Enforce transport timeouts in session and TCP loop.
-- [x] Connected transition depends on successful pairing/trust at PC session layer.
-- [x] Android Connected transition depends on authenticated HelloAck/PairResult.
-- [x] Graceful disconnect frame and peer-close handling.
-- [x] Android persistent trust data integration in PairingManager.
-- [x] Keep Android feature writes serialized through ConnectionManager.
-- [x] PC-side periodic heartbeat sender in the live authenticated session path.
-- [x] Android can persist the last PC endpoint independently of discovery.
-- [x] Android can persist the selected PC identity.
-- [x] Persist preferred transport route metadata and prioritize it during reconnect.
-- [x] PC route model can remember the last successful transport.
-- [x] PC has a route-attempt coordinator for TCP transports.
-- [x] Connect saved-PC selection directly to live Android ConnectionManager.
-- [x] PC RouteStore is available to the live ConnectionCoordinator.
-- [x] Route persistence is exposed only through `mark_authenticated()` on the PC coordinator.
-- [x] Wire `mark_authenticated()` into the authenticated ControlSession owner.
-- [x] Windows WinRT RFCOMM discovery/connect backend foundation.
-- [x] Expose Windows RFCOMM backend through the platform module.
-- [x] Adapt WinRT StreamSocket to the common Tokio byte-stream boundary.
-- [x] Add transport-independent TLS server acceptor boundary.
-- [x] ConnectionManager accepts TLS over arbitrary AsyncRead/AsyncWrite transports.
-- [x] Authenticated ControlSession is connected to ConnectionCoordinator route persistence.
-- [x] Refactor the PC authenticated session handler to accept generic TLS transports.
-- [x] Connect the Windows RFCOMM accept/listener loop into `serve_tls_stream()` at the source-code level.
-- [ ] Confirm Windows RFCOMM → TLS → ControlSession with an actual build/runtime test.
-- [ ] Add Android direct RFCOMM client and reconnect path.
-- [ ] Complete actual direct Bluetooth RFCOMM/L2CAP adapters for Linux and macOS.
-
-## Stabilization checklist
-- [x] Inspect current branch tree and confirm PC/Android projects are present.
-- [x] Inspect Rust dependency set for TLS/Windows Bluetooth foundation.
-- [x] Inspect Identity API against TLS bridge usage.
-- [x] Inspect Windows RFCOMM listener API against the common stream boundary.
-- [x] Fix the confirmed Windows TLS argument mismatch.
+## P0 — remaining
+- [ ] Connect `BasicUi` command receiver to the actual live ControlSession owner and serialized TLS writer.
+- [ ] Make PC Forget revoke the persistent TrustStore, not only the live pairing session.
+- [ ] Make desktop pairing result update the live UI state after the writer completes.
 - [ ] Run `cargo check` on PC.
 - [ ] Run `cargo test` on PC.
 - [ ] Run Android unit tests.
 - [ ] Run Android debug compilation.
-- [ ] Resolve remaining compile/API errors before adding Linux/macOS transports.
+- [ ] Fix all compile/API errors found by the stabilization pass.
+- [ ] Confirm Windows RFCOMM → TLS → ControlSession at runtime.
+- [ ] Android direct RFCOMM client.
+- [ ] Linux BlueZ RFCOMM/L2CAP transport.
+- [ ] macOS IOBluetooth transport.
 
-## Pairing UX
-- [x] PC displays the stable pairing short code in the desktop wizard.
-- [x] Android displays the PC pairing challenge and explicit confirmation action.
-- [x] Android persists trusted PC identity after successful PairResult/HelloAck.
-- [x] PC pairing server forwards live challenge/result events to the shared UI state/backend.
-- [x] Protocol supports explicit PC Allow/Reject decisions.
-- [x] Android consumes PC Allow/Reject decisions.
-- [x] Desktop GUI exposes Allow/Reject/Forget actions.
-- [x] Bind desktop Allow/Reject actions to the live session writer.
-- [x] Android explicit "Forget this PC" control.
-- [x] PC explicit "Forget this phone" control in the desktop GUI.
-- [x] PC-side command/API for revoking trust from the GUI.
-
-## P1 — calls / HFP
-- [ ] Decouple `BridgeInCallService` lifecycle from CallBridge; use an application-level call gateway.
-- [ ] Android PhoneBluetoothStatus capability reporting.
-- [ ] PC PcBluetoothStatus after authentication.
-- [ ] Wire CallController lifetime into live ControlSession.
-- [ ] Windows native HFP capability detection/control.
-- [ ] Linux native BlueZ D-Bus HFP capability detection/control.
-- [ ] macOS native IOBluetooth HFP capability detection/control.
-- [ ] Audio routing diagnostics and restoration.
-
-## P1 — discovery
-- [x] UDP discovery on normal Wi-Fi/LAN.
-- [x] UDP discovery usable on a PC-created hotspot when broadcast is permitted by the OS/firewall.
-- [x] Android PeerRegistry model and TTL pruning primitive.
-- [x] PC PeerRegistry model and TTL pruning primitive.
-- [x] DiscoveryClient persists announced PC endpoints.
-- [ ] Wire DiscoveryClient to a dedicated Android PeerRegistry service.
-- [ ] Validate announcements against expected protocol/schema constraints.
-- [x] Discovered fingerprint carried into TLS pinning.
-- [x] Persist selected PC endpoint.
-- [ ] Advertise direct Bluetooth endpoint when native Bluetooth backend is available.
-
-## P1 — media
-- [ ] Play/pause, next/previous, volume, metadata.
-- [ ] Android MediaSession integration.
-- [ ] Windows/macOS/Linux media backends.
-
-## P2
+## P1
+- [ ] HFP capability/control on Windows/Linux/macOS.
+- [ ] Media controls and metadata.
 - [ ] Notifications.
-- [ ] Clipboard with loop prevention and size limits.
-- [ ] Chunked/resumable files with hash verification.
+- [ ] Clipboard.
+- [ ] Chunked/resumable file transfer.
 
 ## Rules
 1. Core never directly calls OS APIs.
 2. Protocol changes are implemented in Rust and Kotlin together.
 3. Discovery is not authentication.
-4. Prefer additive protocol changes.
-5. Keep LAN functionality cloud-independent.
-6. Do not merge unfinished experiments into main.
-7. Bluetooth PAN is a network route; direct Bluetooth RFCOMM/L2CAP is a separate transport.
-8. Code comments are written in English; development map is maintained as the handoff source of truth.
-9. Do not mark a native OS backend complete until it actually opens/discovers the required Bluetooth transport and is connected to the common byte-stream/TLS layer.
-10. Refresh the current file SHA immediately before every update; never reuse an older blob SHA.
+4. Bluetooth PAN is a network route; direct Bluetooth RFCOMM/L2CAP is a separate transport.
+5. Code comments are in English.
+6. Do not mark a transport complete before runtime integration.
+7. Refresh the current file SHA immediately before every update.
+8. Do not claim builds/tests passed unless actually executed.
 
 ## Handoff
-Read this map first, then continue from the first unchecked stabilization item. Do not add Linux/macOS transports until the PC and Android builds are actually green.
-
-## Next coding target
-**Run the PC/Android build and test pass. Fix every compile/API issue found. Only then continue with Android direct RFCOMM, Linux BlueZ, and macOS IOBluetooth.**
+Next work must start with the live `UiCommand` receiver/writer integration. Then run the requested stabilization build/test pass before adding another OS transport.
