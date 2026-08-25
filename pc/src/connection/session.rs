@@ -66,6 +66,19 @@ impl ControlSession {
         }
         Ok(outgoing)
     }
+
+    /// Apply one command originating from the desktop UI to this live control session.
+    pub async fn handle_ui_command(&mut self, command: crate::ui::UiCommand, peer_fingerprint: Option<&str>) -> Result<Vec<Message>> {
+        match command {
+            crate::ui::UiCommand::ApprovePairing { device_id, short_code } => self.handle_with_peer(Message::PairApprove { device_id, short_code }, false, peer_fingerprint).await,
+            crate::ui::UiCommand::RejectPairing { device_id, reason } => self.handle_with_peer(Message::PairReject { device_id, reason }, false, peer_fingerprint).await,
+            crate::ui::UiCommand::ForgetPeer { device_id } => {
+                self.pairing.revoke(&device_id)?;
+                self.state = ConnectionState::Handshaking;
+                Ok(vec![Message::Disconnect { reason: "trust revoked by desktop user".into() }])
+            }
+        }
+    }
 }
 
 impl Default for ControlSession { fn default() -> Self { Self::new() } }
