@@ -1,1 +1,0 @@
-GUI fix is required: eframe/winit must be initialized on the Windows main thread, not inside std::thread::spawn. Current main.rs launches eframe::run_native from a spawned thread, causing winit 0.30 to panic. Apply by moving eframe::run_native out of std::thread::spawn while keeping Tokio network tasks on the runtime.
