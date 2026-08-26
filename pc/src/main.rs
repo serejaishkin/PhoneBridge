@@ -1,5 +1,7 @@
+mod audio;
 mod call;
 mod discovery;
+mod network;
 mod pairing;
 mod protocol;
 mod sms;
@@ -69,6 +71,34 @@ fn main() -> anyhow::Result<()> {
             if let Err(e) = discovery::run_broadcaster(identity).await {
                 log::error!("discovery task exited: {e:#}");
             }
+        });
+    }
+
+    // Media audio receiver: Android captures playback via MediaProjection,
+    // Opus-encodes it and streams UDP packets ([seq u16 BE][opus]) here.
+    // Runs for the whole daemon lifetime; silence on the port is normal while
+    // the phone is not casting.
+    {
+        let ui = ui.clone();
+        runtime.spawn(async move {
+            let jitter = Arc::new(tokio::sync::Mutex::new(audio::jitter_buffer::JitterBuffer::new(4, 32)));
+            let decoder = match audio::decoder::OpusDecoder::new() {
+                Ok(decoder) => decoder,
+                Err(e) => {
+                    log::error!("media audio disabled, opus decoder init failed: {e}");
+                    return;
+                }
+            };
+            let server = match network::udp_server::UdpServer::new("0.0.0.0:5001", jitter, decoder).await {
+                Ok(server) => server,
+                Err(e) => {
+                    let _ = &ui;
+                    log::error!("media audio disabled, cannot bind UDP :5001 ({e})");
+                    return;
+                }
+            };
+            log::info!("media audio listening on udp/:5001");
+            server.run().await;
         });
     }
 

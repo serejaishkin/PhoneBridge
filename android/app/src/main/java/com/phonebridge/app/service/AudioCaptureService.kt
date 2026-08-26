@@ -28,6 +28,8 @@ class AudioCaptureService : Service() {
     private var isCapturing = false
     private var sequenceNumber: Short = 0
     private val opusEncoder = OpusEncoder()
+    /** PC address taken from the control-plane settings, gateway as fallback. */
+    private var pcHost: String? = null
 
     companion object {
         const val CHANNEL_ID = "phonebridge_audio"
@@ -36,6 +38,10 @@ class AudioCaptureService : Service() {
         const val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
         const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
         const val BUFFER_SIZE = 1920
+        const val EXTRA_CODE = "code"
+        const val EXTRA_DATA = "data"
+        const val EXTRA_HOST = "host"
+        const val MEDIA_PORT = 5001
     }
 
     override fun onCreate() {
@@ -44,13 +50,15 @@ class AudioCaptureService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val code = intent?.getIntExtra("code", -1) ?: -1
-        val data = intent?.getParcelableExtra<Intent>("data")
+        val code = intent?.getIntExtra(EXTRA_CODE, -1) ?: -1
+        @Suppress("DEPRECATION")
+        val data = intent?.getParcelableExtra<Intent>(EXTRA_DATA)
 
         if (code == -1 || data == null) {
             stopSelf()
             return START_NOT_STICKY
         }
+        pcHost = intent.getStringExtra(EXTRA_HOST)?.trim()?.ifBlank { null }
 
         val manager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         mediaProjection = manager.getMediaProjection(code, data)
@@ -90,7 +98,7 @@ class AudioCaptureService : Service() {
             val pcmBuffer = ShortArray(960)
             val opusBuffer = ByteArray(1500)
             val packetBuffer = ByteBuffer.allocate(1500)
-            val pcAddress = detectGatewayIp()
+            val pcAddress = pcHost?.let { runCatching { InetAddress.getByName(it) }.getOrNull() } ?: detectGatewayIp()
 
             while (isCapturing) {
                 val read = audioRecord?.read(pcmBuffer, 0, pcmBuffer.size) ?: 0

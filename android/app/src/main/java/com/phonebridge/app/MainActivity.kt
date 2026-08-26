@@ -2,6 +2,7 @@ package com.phonebridge.app
 
 import android.Manifest
 import android.content.Intent
+import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Toast
@@ -17,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import com.phonebridge.app.call.CallManager
 import com.phonebridge.app.discovery.BleAdvertiser
 import com.phonebridge.app.media.MediaControllerBridge
+import com.phonebridge.app.service.AudioCaptureService
 import com.phonebridge.app.sms.SmsBridge
 import com.phonebridge.app.ui.theme.PhoneBridgeTheme
 
@@ -24,11 +26,24 @@ class MainActivity : ComponentActivity() {
     private val bleAdvertiser by lazy { BleAdvertiser(this) }
     private val callManager by lazy { CallManager(this) }
 
+    private var pendingHost = "192.168.137.1"
+
     private val permissionsLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         if (permissions.entries.all { it.value }) startBridge()
         else Toast.makeText(this, "Нужны разрешения для звонков и SMS", Toast.LENGTH_LONG).show()
+    }
+
+    /** System dialog asking the user which audio to share; result starts capture. */
+    private val mediaProjectionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK && result.data != null) {
+            startAudioCapture(result.resultCode, result.data!!)
+        } else {
+            Toast.makeText(this, "Трансляция звука не разрешена", Toast.LENGTH_SHORT).show()
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -40,14 +55,13 @@ class MainActivity : ComponentActivity() {
                     MainScreen(
                         onStart = { host -> requestPermissions(host) },
                         onEnableMediaAccess = { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
+                        onCastAudio = { requestAudioCaptureConsent() },
                         onStop = { stopBridge() }
                     )
                 }
             }
         }
     }
-
-    private var pendingHost = "192.168.137.1"
 
     private fun requestPermissions(host: String) {
         pendingHost = host.trim().ifBlank { "192.168.137.1" }
@@ -63,6 +77,21 @@ class MainActivity : ComponentActivity() {
         ))
     }
 
+    private fun requestAudioCaptureConsent() {
+        val manager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        mediaProjectionLauncher.launch(manager.createScreenCaptureIntent())
+    }
+
+    private fun startAudioCapture(resultCode: Int, data: Intent) {
+        val serviceIntent = Intent(this, AudioCaptureService::class.java).apply {
+            putExtra(AudioCaptureService.EXTRA_CODE, resultCode)
+            putExtra(AudioCaptureService.EXTRA_DATA, data)
+            putExtra(AudioCaptureService.EXTRA_HOST, pendingHost)
+        }
+        startForegroundService(serviceIntent)
+        Toast.makeText(this, "Звук транслируется на $pendingHost", Toast.LENGTH_SHORT).show()
+    }
+
     private fun startBridge() {
         callManager.start(pendingHost)
         MediaControllerBridge.init(this)
@@ -74,6 +103,7 @@ class MainActivity : ComponentActivity() {
     private fun stopBridge() {
         callManager.stop()
         bleAdvertiser.stop()
+        stopService(Intent(this, AudioCaptureService::class.java))
         Toast.makeText(this, "PhoneBridge остановлен", Toast.LENGTH_SHORT).show()
     }
 
@@ -88,6 +118,7 @@ class MainActivity : ComponentActivity() {
 private fun MainScreen(
     onStart: (String) -> Unit,
     onEnableMediaAccess: () -> Unit,
+    onCastAudio: () -> Unit,
     onStop: () -> Unit
 ) {
     var host by remember { mutableStateOf("192.168.137.1") }
@@ -108,6 +139,8 @@ private fun MainScreen(
         )
         Spacer(Modifier.height(12.dp))
         Button(onClick = { onStart(host) }) { Text("Подключить") }
+        Spacer(Modifier.height(12.dp))
+        Button(onClick = onCastAudio) { Text("Трансляция звука на ПК") }
         Spacer(Modifier.height(12.dp))
         OutlinedButton(onClick = onEnableMediaAccess) { Text("Доступ к медиа") }
         Spacer(Modifier.height(12.dp))

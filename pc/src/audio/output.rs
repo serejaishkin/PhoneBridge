@@ -64,4 +64,9 @@ impl AudioOutput {
     pub fn send_frame(&self, frame: Vec<i16>) -> Result<(), crossbeam_channel::TrySendError<Vec<i16>>> {
         self.sender.try_send(frame)
     }
+
+    /// Additional producer handle; the cpal callback drains the same channel.
+    pub fn sender_clone(&self) -> Sender<Vec<i16>> {
+        self.sender.clone()
+    }
 }

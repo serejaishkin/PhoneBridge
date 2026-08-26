@@ -160,9 +160,12 @@ Bluetooth is treated as a transport/backend problem, not as a replacement protoc
 - [ ] Route preference and fallback between LAN, hotspot and Bluetooth.
 
 ### Phase 6 — PhoneBridge-specific features
+- [x] Media audio receiver on PC: UDP :5001 -> Opus decode -> jitter buffer -> cpal output, owned by a dedicated audio thread (cpal Stream is !Send); verified live that the listener starts (2026-08-26).
+- [x] Android media capture path wired: MainActivity MediaProjection consent flow -> AudioCaptureService (host passed via intent) -> Opus/UDP to PC :5001; service declared in manifest with mediaProjection type. Not compiled/run — no SDK (2026-08-26).
+- [ ] End-to-end audio test on two real devices.
 - [ ] Phone call control.
 - [ ] HFP state/control.
-- [ ] Android → PC audio streaming.
+- [ ] Android → PC audio streaming runtime polish: packet-loss stats, mute toggle wiring.
 - [ ] PC → Android microphone/audio path.
 - [ ] Opus transport and recovery.
 - [ ] Media integration.
