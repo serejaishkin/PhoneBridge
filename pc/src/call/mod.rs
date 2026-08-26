@@ -8,6 +8,8 @@
 use crate::protocol::HfpSupport;
 #[cfg(target_os = "linux")]
 pub mod hfp_linux;
+#[cfg(target_os = "macos")]
+pub mod hfp_macos;
 #[cfg(windows)]
 pub mod hfp_windows;
 use std::sync::Arc;
@@ -40,12 +42,10 @@ impl SharedState {
 /// Check whether this PC's Bluetooth adapter supports the Hands-Free Unit role
 /// (HFP client). This determines whether call audio can work at all.
 ///
-/// Platform dispatch:
-/// - Windows: real detection via WinRT (see `hfp_windows.rs`).
-/// - Linux: real detection via BlueZ D-Bus (see `hfp_linux.rs`).
-/// - macOS: not implemented yet — returns Unknown; per AI_HANDOFF_GUI.md 4.1
-///   the UI must show this as "needs manual verification", not as an error.
-///   TODO: IOBluetooth check (macOS).
+/// Platform dispatch — all three desktop platforms have real detection now:
+/// - Windows: WinRT RFCOMM service cache (see `hfp_windows.rs`).
+/// - Linux: BlueZ D-Bus adapter UUIDs (see `hfp_linux.rs`).
+/// - macOS: IOBluetooth default controller (see `hfp_macos.rs`).
 #[cfg(windows)]
 pub async fn check_hfp_support() -> HfpSupport {
     hfp_windows::detect().await
@@ -56,11 +56,7 @@ pub async fn check_hfp_support() -> HfpSupport {
     hfp_linux::detect().await
 }
 
-#[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(target_os = "macos")]
 pub async fn check_hfp_support() -> HfpSupport {
-    log::warn!(
-        "check_hfp_support(): platform detection not implemented on this OS yet, \
-         returning Unknown. UI must show this as 'needs manual verification', not as an error."
-    );
-    HfpSupport::Unknown
+    hfp_macos::detect().await
 }

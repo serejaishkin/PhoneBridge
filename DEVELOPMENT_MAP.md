@@ -126,7 +126,9 @@ Reuse only where it provides functionality not already better supplied by the se
 - [x] Route pairing Allow/Reject decisions through the desktop UI backed by TrustStore (2026-08-26).
 - [x] Pin PC certificate fingerprints on Android per host (TOFU) with HelloAck cross-check (2026-08-26).
 - [x] Real Windows HFP support detection via WinRT RFCOMM service cache (2026-08-26).
-- [x] Linux HFP support detection via BlueZ D-Bus/zbus; module compile-verified against zbus 5.19, runtime test on a real Linux box still pending; macOS remains stubbed as Unknown (2026-08-26).
+- [x] Linux HFP support detection via BlueZ D-Bus/zbus; module compile-verified against zbus 5.19, runtime test on a real Linux box still pending (2026-08-26).
+- [x] macOS HFP support detection via IOBluetooth; module compile-verified under aarch64-apple-darwin, runtime test on a real Mac still pending (2026-08-26).
+- [x] Restore system tray for Windows/macOS via tray-icon inside the eframe creator closure; Linux tray deferred due to GTK/winit main-thread conflict — eframe window is the Linux UI for now (2026-08-26).
 - [ ] Replace old PhoneBridge Hello/HelloAck pairing protocol with KDE Connect-compatible path.
 - [ ] Add mutual TLS client-certificate authentication (Android must present its certificate during the handshake itself; fingerprint verification is currently at the protocol layer only).
 - [ ] Add Android packet/session implementation.

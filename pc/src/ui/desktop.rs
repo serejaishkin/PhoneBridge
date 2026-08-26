@@ -1,6 +1,8 @@
 use crate::protocol::{HfpSupport, MediaCommand, MediaPlaybackState, Message};
 use crate::sms::{SmsController, SmsStore};
 use crate::ui::{PairingRequest, UiBackend};
+#[cfg(any(windows, target_os = "macos"))]
+use crate::ui::tray::{TrayCommand, TrayUI};
 use async_trait::async_trait;
 use eframe::egui;
 use std::sync::{Arc, Mutex};
@@ -121,11 +123,32 @@ pub struct PhoneBridgeApp {
     selected_address: String,
     sms_body: String,
     selected_sms: Option<usize>,
+    /// Tray lives as long as the app; created on the main thread by eframe.
+    #[cfg(any(windows, target_os = "macos"))]
+    _tray: Option<TrayUI>,
 }
 
 impl PhoneBridgeApp {
     pub fn new(state: Arc<Mutex<DesktopState>>, sms_store: Arc<tokio::sync::Mutex<SmsStore>>, controller: SmsController, runtime: Handle) -> Self {
-        Self { state, sms_store, controller, runtime, selected_address: String::new(), sms_body: String::new(), selected_sms: None }
+        #[cfg(any(windows, target_os = "macos"))]
+        let _tray = match TrayUI::new() {
+            Ok(tray) => Some(tray),
+            Err(e) => {
+                log::warn!("system tray unavailable: {e}");
+                None
+            }
+        };
+        Self {
+            state,
+            sms_store,
+            controller,
+            runtime,
+            selected_address: String::new(),
+            sms_body: String::new(),
+            selected_sms: None,
+            #[cfg(any(windows, target_os = "macos"))]
+            _tray,
+        }
     }
 
     fn send(&self, message: Message) {
@@ -154,6 +177,21 @@ impl PhoneBridgeApp {
 impl eframe::App for PhoneBridgeApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.request_repaint_after(std::time::Duration::from_millis(250));
+
+        // Drain tray menu commands first so they act within this frame.
+        #[cfg(any(windows, target_os = "macos"))]
+        if let Some(tray) = &self._tray {
+            for command in tray.poll_commands() {
+                match command {
+                    TrayCommand::AnswerCall => self.send(Message::CallAnswer),
+                    TrayCommand::EndCall => self.send(Message::CallDecline),
+                    // No audio pipeline is wired yet; keep the item responsive.
+                    TrayCommand::ToggleMute => log::info!("tray: mute toggle requested (no audio path yet)"),
+                    TrayCommand::OpenSettings => log::info!("tray: settings requested (not implemented yet)"),
+                    TrayCommand::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+                }
+            }
+        }
 
         let (connected, peer_name, hfp, caller_name, caller_number, ringing, media_state, media_title, media_artist, media_album, sms_notice, sms_error, local_code) = {
             let state = self.state.lock().unwrap();

@@ -4,6 +4,10 @@ use crate::protocol::{HfpSupport, MediaPlaybackState};
 use async_trait::async_trait;
 
 pub mod desktop;
+// GTK's main-loop requirement on Linux conflicts with winit owning the main
+// thread here, so the tray is Windows/macOS only for now (see tray.rs docs).
+#[cfg(any(windows, target_os = "macos"))]
+pub mod tray;
 
 /// A pending pairing decision surfaced to the user. The user compares the two
 /// short codes visually (phone screen vs PC screen) and allows or rejects.
