@@ -29,22 +29,14 @@ class MainActivity : ComponentActivity() {
     private var pendingHost = "192.168.137.1"
     private var micRelayEnabled by mutableStateOf(false)
 
-    private val permissionsLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
+    private val permissionsLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
         if (permissions.entries.all { it.value }) startBridge()
         else Toast.makeText(this, "Нужны разрешения для звонков и SMS", Toast.LENGTH_LONG).show()
     }
 
-    /** System dialog asking the user which audio to share; result starts capture. */
-    private val mediaProjectionLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == RESULT_OK && result.data != null) {
-            startAudioCapture(result.resultCode, result.data!!)
-        } else {
-            Toast.makeText(this, "Трансляция звука не разрешена", Toast.LENGTH_SHORT).show()
-        }
+    private val mediaProjectionLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == RESULT_OK && result.data != null) startAudioCapture(result.resultCode, result.data!!)
+        else Toast.makeText(this, "Трансляция звука не разрешена", Toast.LENGTH_SHORT).show()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -54,6 +46,7 @@ class MainActivity : ComponentActivity() {
             PhoneBridgeTheme {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     MainScreen(
+                        micRelayEnabled = micRelayEnabled,
                         onStart = { host -> requestPermissions(host) },
                         onEnableMediaAccess = { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
                         onCastAudio = { requestAudioCaptureConsent() },
@@ -71,14 +64,10 @@ class MainActivity : ComponentActivity() {
     private fun requestPermissions(host: String) {
         pendingHost = host.trim().ifBlank { "192.168.137.1" }
         permissionsLauncher.launch(arrayOf(
-            Manifest.permission.INTERNET,
-            Manifest.permission.ACCESS_WIFI_STATE,
-            Manifest.permission.ACCESS_NETWORK_STATE,
-            Manifest.permission.READ_PHONE_STATE,
-            Manifest.permission.ANSWER_PHONE_CALLS,
-            Manifest.permission.READ_SMS,
-            Manifest.permission.RECEIVE_SMS,
-            Manifest.permission.SEND_SMS
+            Manifest.permission.INTERNET, Manifest.permission.ACCESS_WIFI_STATE,
+            Manifest.permission.ACCESS_NETWORK_STATE, Manifest.permission.READ_PHONE_STATE,
+            Manifest.permission.ANSWER_PHONE_CALLS, Manifest.permission.READ_SMS,
+            Manifest.permission.RECEIVE_SMS, Manifest.permission.SEND_SMS
         ))
     }
 
@@ -88,12 +77,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startAudioCapture(resultCode: Int, data: Intent) {
-        val serviceIntent = Intent(this, AudioCaptureService::class.java).apply {
+        startForegroundService(Intent(this, AudioCaptureService::class.java).apply {
             putExtra(AudioCaptureService.EXTRA_CODE, resultCode)
             putExtra(AudioCaptureService.EXTRA_DATA, data)
             putExtra(AudioCaptureService.EXTRA_HOST, pendingHost)
-        }
-        startForegroundService(serviceIntent)
+        })
         Toast.makeText(this, "Звук транслируется на $pendingHost", Toast.LENGTH_SHORT).show()
     }
 
@@ -109,7 +97,7 @@ class MainActivity : ComponentActivity() {
         callManager.stop()
         bleAdvertiser.stop()
         stopService(Intent(this, AudioCaptureService::class.java))
-        stopService(Intent(this, AudioPlaybackService::class.java))
+        stopService(Intent(this, com.phonebridge.app.service.AudioPlaybackService::class.java))
         micRelayEnabled = false
         Toast.makeText(this, "PhoneBridge остановлен", Toast.LENGTH_SHORT).show()
     }
@@ -123,6 +111,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun MainScreen(
+    micRelayEnabled: Boolean,
     onStart: (String) -> Unit,
     onEnableMediaAccess: () -> Unit,
     onCastAudio: () -> Unit,
@@ -139,12 +128,7 @@ private fun MainScreen(
         Spacer(Modifier.height(8.dp))
         Text("Звонки • Медиа • SMS", style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(24.dp))
-        OutlinedTextField(
-            value = host,
-            onValueChange = { host = it },
-            label = { Text("IP компьютера") },
-            singleLine = true
-        )
+        OutlinedTextField(value = host, onValueChange = { host = it }, label = { Text("IP компьютера") }, singleLine = true)
         Spacer(Modifier.height(12.dp))
         Button(onClick = { onStart(host) }) { Text("Подключить") }
         Spacer(Modifier.height(12.dp))
