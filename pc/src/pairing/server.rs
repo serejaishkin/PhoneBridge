@@ -1,10 +1,19 @@
 //! TLS control-plane listener: pairing, calls, media and SMS.
+//!
+//! Session handshake:
+//! 1. Android connects over TLS and sends `Hello` including its certificate
+//!    fingerprint.
+//! 2. If `(device_id, fingerprint)` is already in the TrustStore, the session is
+//!    accepted immediately (`HelloAck.trusted = true`).
+//! 3. Otherwise a `PairingRequest` is surfaced to the desktop UI. The user
+//!    compares short codes on both screens and allows or rejects. Allowing
+//!    persists the peer in the TrustStore; rejecting closes the connection.
 
 use crate::pairing::identity::Identity;
 use crate::pairing::trust::{short_code, TrustStore};
 use crate::protocol::Message;
 use crate::sms::{SmsController, SmsStore};
-use crate::ui::UiBackend;
+use crate::ui::{PairingRequest, UiBackend};
 use anyhow::{Context, Result};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig;
@@ -30,6 +39,9 @@ impl PairingServer {
     pub fn new(identity: Arc<Identity>, trust_store: Arc<Mutex<TrustStore>>, ui: Arc<dyn UiBackend>, sms_controller: SmsController, sms_store: Arc<Mutex<SmsStore>>) -> Result<Self> {
         let cert_der = load_cert_chain(&identity.cert_pem)?;
         let key_der = load_private_key(&identity.key_pem)?;
+        // TODO(pairing): switch to client-certificate authentication once Android
+        // sends its certificate during the TLS handshake itself; fingerprint
+        // verification currently happens at the protocol layer via Hello.
         let config = ServerConfig::builder().with_no_client_auth().with_single_cert(cert_der, key_der).context("building TLS server config")?;
         Ok(Self { acceptor: TlsAcceptor::from(Arc::new(config)), trust_store, identity, ui, sms_controller, sms_store })
     }
@@ -61,15 +73,45 @@ async fn handle_connection(stream: tokio::net::TcpStream, acceptor: TlsAcceptor,
 
     let hello_line = lines.next_line().await?.context("connection closed before Hello")?;
     let hello = Message::from_line(&hello_line)?;
-    let (peer_id, peer_name) = match &hello {
-        Message::Hello { device_id, device_name, .. } => (device_id.clone(), device_name.clone()),
+    let (peer_id, peer_name, peer_fingerprint) = match &hello {
+        Message::Hello { device_id, device_name, cert_fingerprint, .. } =>
+            (device_id.clone(), device_name.clone(), cert_fingerprint.clone()),
         other => anyhow::bail!("expected Hello as first message, got {other:?}"),
     };
 
-    let trusted = trust_store.lock().await.is_trusted(&peer_id, "");
-    if !trusted { log::info!("unpaired device connected: {peer_name} ({peer_id}); short_code={}", short_code(&identity.fingerprint_hex())); }
+    // Without a fingerprint there is nothing to pin or verify later, so refuse
+    // the session instead of silently trusting an unidentifiable client.
+    let Some(peer_fingerprint) = peer_fingerprint else {
+        let reason = "client did not provide a certificate fingerprint".to_string();
+        log::warn!("rejecting {peer_name}: {reason}");
+        writer.write_all(Message::Error { message: reason }.to_line()?.as_bytes()).await?;
+        return Ok(());
+    };
 
-    writer.write_all(Message::HelloAck { device_id: identity.device_id.clone(), device_name: hostname(), trusted }.to_line()?.as_bytes()).await?;
+    let mut trusted = trust_store.lock().await.is_trusted(&peer_id, &peer_fingerprint);
+
+    if !trusted {
+        let request = PairingRequest {
+            device_id: peer_id.clone(),
+            device_name: peer_name.clone(),
+            peer_code: short_code(&peer_fingerprint),
+            local_code: short_code(&identity.fingerprint_hex()),
+        };
+        log::info!("pairing requested by {} ({}); code {}", peer_name, peer_id, request.peer_code);
+        if ui.request_pairing_decision(request).await {
+            trust_store.lock().await.trust(&peer_id, &peer_fingerprint).context("persisting trusted peer")?;
+            log::info!("pairing accepted for {peer_name} ({peer_id})");
+            trusted = true;
+        } else {
+            log::info!("pairing rejected for {peer_name} ({peer_id})");
+            let ack = Message::HelloAck { device_id: identity.device_id.clone(), device_name: hostname(), trusted: false, cert_fingerprint: identity.fingerprint_hex() };
+            writer.write_all(ack.to_line()?.as_bytes()).await?;
+            return Ok(());
+        }
+    }
+
+    let ack = Message::HelloAck { device_id: identity.device_id.clone(), device_name: hostname(), trusted, cert_fingerprint: identity.fingerprint_hex() };
+    writer.write_all(ack.to_line()?.as_bytes()).await?;
     ui.update_connection_status(true, Some(&peer_name)).await;
 
     let (tx, mut rx) = mpsc::channel::<Message>(64);

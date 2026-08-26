@@ -2,25 +2,43 @@ package com.phonebridge.app.network
 
 import android.os.Build
 import com.phonebridge.app.media.MediaControllerBridge
-import org.json.JSONObject
+import com.phonebridge.app.pairing.PhoneIdentity
+import com.phonebridge.app.pairing.TrustStore
 import java.io.BufferedReader
 import java.io.BufferedWriter
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.security.MessageDigest
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
 import java.util.UUID
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.X509TrustManager
 
-/** TLS + newline-delimited JSON control client matching pc/src/protocol.rs. */
+/**
+ * TLS + newline-delimited JSON control client matching pc/src/protocol.rs.
+ *
+ * Security model:
+ * - The phone sends its persistent certificate fingerprint inside Hello so the
+ *   PC can run the pairing gate (desktop Allow/Reject) and pin the device.
+ * - The server certificate is pinned per host on first connect (TOFU); later
+ *   connections require an exact match. The HelloAck fingerprint is cross-checked
+ *   against the pinned value to defend against a different machine reusing the IP.
+ */
 class SignalingClient(
-    private val onCommand: (String, Map<String, String>) -> Unit = { _, _ -> }
+    private val onCommand: (String, Map<String, String>) -> Unit = { _, _ -> },
+    private val onStatus: (String, String?) -> Unit = { _, _ -> },
+    private val identityProvider: () -> PhoneIdentity? = { null },
+    private val trustProvider: () -> TrustStore? = { null }
 ) {
     @Volatile private var socket: SSLSocket? = null
     @Volatile private var writer: BufferedWriter? = null
     @Volatile private var connected = false
+    @Volatile private var currentHost: String? = null
+    @Volatile private var firstConnection = false
 
     fun connect(url: String) { Thread { runCatching { open(url, 5_000) } }.start() }
 
@@ -33,17 +51,39 @@ class SignalingClient(
     private fun open(url: String, timeoutMs: Long) {
         disconnect()
         val (host, port) = parseTarget(url)
-        val trustAll = object : X509TrustManager {
-            override fun getAcceptedIssuers() = emptyArray<java.security.cert.X509Certificate>()
-            override fun checkClientTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) = Unit
-            override fun checkServerTrusted(chain: Array<java.security.cert.X509Certificate>, authType: String) = Unit
+        currentHost = host
+        val trustStore = trustProvider()
+
+        // Pin the expected PC certificate fingerprint for this host. The first
+        // connection records it (trust-on-first-use); later ones must match.
+        val expectedFingerprint = trustStore?.pinFor("host:$host")
+        firstConnection = false
+        var recordedPin: String? = null
+
+        val pinningTrustManager = object : X509TrustManager {
+            override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
+            override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) = Unit
+            override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
+                val leaf = chain.firstOrNull() ?: throw java.security.cert.CertificateException("empty server chain")
+                val fingerprint = sha256Hex(leaf.encoded)
+                when {
+                    expectedFingerprint == null -> { firstConnection = true; recordedPin = fingerprint }
+                    !fingerprint.equals(expectedFingerprint, ignoreCase = true) ->
+                        throw java.security.cert.CertificateException("PC certificate changed for $host")
+                }
+            }
         }
+
         val context = SSLContext.getInstance("TLS").apply {
-            init(null, arrayOf(trustAll), java.security.SecureRandom())
+            init(null, arrayOf(pinningTrustManager), SecureRandom())
         }
         val raw = Socket().apply { connect(InetSocketAddress(host, port), timeoutMs.toInt()) }
         val ssl = context.socketFactory.createSocket(raw, host, port, true) as SSLSocket
         ssl.startHandshake()
+        if (firstConnection && trustStore != null && recordedPin != null) {
+            trustStore.pin("host:$host", recordedPin!!)
+            onStatus("first_connection", host)
+        }
         socket = ssl
         writer = BufferedWriter(OutputStreamWriter(ssl.outputStream, Charsets.UTF_8))
         connected = true
@@ -70,7 +110,35 @@ class SignalingClient(
             val type = root.optString("type")
             val data = root.optJSONObject("data")
             when (type) {
-                "HelloAck" -> sendEvent("media_state", MediaControllerBridge.snapshot())
+                "HelloAck" -> {
+                    val trusted = data?.optBoolean("trusted") ?: false
+                    val pcFingerprint = data?.optString("cert_fingerprint").orEmpty()
+                    val pcDeviceId = data?.optString("device_id").orEmpty()
+                    val host = currentHost
+                    val trustStore = trustProvider()
+
+                    // Cross-check: whatever certificate we pinned for this host must be
+                    // the machine that actually answered with this device id.
+                    if (pcFingerprint.isNotEmpty() && host != null && trustStore != null) {
+                        val pinned = trustStore.pinFor("host:$host")
+                        if (pinned != null && !pcFingerprint.equals(pinned, ignoreCase = true)) {
+                            onStatus("certificate_mismatch", host)
+                            disconnect()
+                            return
+                        }
+                        if (pcDeviceId.isNotEmpty()) trustStore.pin("device:$pcDeviceId", pcFingerprint)
+                    }
+
+                    if (!trusted) {
+                        // The PC pairing dialog was rejected; the server closes next.
+                        onStatus("pairing_rejected", host)
+                        disconnect()
+                        return
+                    }
+
+                    onStatus(if (firstConnection) "connected_unverified" else "connected", null)
+                    sendEvent("media_state", MediaControllerBridge.snapshot())
+                }
                 "Ping" -> sendJson(JSONObject().put("type", "Pong"))
                 "MediaCommand" -> {
                     onCommand("media_command", mapOf("command" to data?.optString("command").orEmpty()))
@@ -81,6 +149,7 @@ class SignalingClient(
                 "sms_send" -> onCommand("sms_send", mapOf("address" to data?.optString("address").orEmpty(), "body" to data?.optString("body").orEmpty()))
                 "sms_list" -> onCommand("sms_list", emptyMap())
                 "PcBluetoothStatus" -> onCommand("pc_bluetooth_status", mapOf("hfp_supported" to data?.optString("hfp_supported").orEmpty()))
+                "Error" -> onStatus("error", data?.optString("message"))
             }
         }
     }
@@ -102,10 +171,23 @@ class SignalingClient(
         if (message != null) sendJson(message)
     }
 
-    private fun hello() = JSONObject().put("type", "Hello").put("data", JSONObject().apply {
-        put("device_id", UUID.nameUUIDFromBytes((Build.BRAND + ":" + Build.DEVICE).toByteArray()).toString())
-        put("device_name", Build.MODEL); put("platform", "android"); put("protocol_version", 1)
-    })
+    private fun hello(): JSONObject {
+        val identity = identityProvider()
+        return JSONObject().put("type", "Hello").put("data", JSONObject().apply {
+            // Persistent device id from the stored identity; fall back to the old
+            // derived UUID only when no identity is available.
+            if (identity != null) {
+                put("device_id", identity.deviceId)
+                put("cert_fingerprint", identity.fingerprintHex())
+            } else {
+                put("device_id", UUID.nameUUIDFromBytes((Build.BRAND + ":" + Build.DEVICE).toByteArray()).toString())
+            }
+            put("device_name", Build.MODEL); put("platform", "android"); put("protocol_version", 1)
+        })
+    }
+
+    private fun sha256Hex(bytes: ByteArray): String =
+        MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
     private fun sendJson(json: JSONObject) {
         synchronized(this) {

@@ -33,6 +33,10 @@ async fn main() -> anyhow::Result<()> {
     *shared_state.hfp_support.lock().await = hfp_status;
     ui.update_hfp_status(hfp_status).await;
 
+    // Show the PC pairing code in the top bar so the user can compare it with
+    // the phone during first-time pairing.
+    desktop_state.lock().unwrap().local_code = pairing::trust::short_code(&identity.fingerprint_hex());
+
     let pairing_server = PairingServer::new(identity.clone(), trust_store.clone(), ui.clone(), sms_controller.clone(), sms_store.clone())?;
     let pairing_task = tokio::spawn(pairing_server.run());
     let discovery_task = tokio::spawn(discovery::run_broadcaster(identity.clone()));

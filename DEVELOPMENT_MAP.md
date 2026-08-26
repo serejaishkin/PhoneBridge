@@ -1,6 +1,6 @@
 # PhoneBridge Development Map
 
-Last updated: 2026-08-21
+Last updated: 2026-08-26
 
 ## Project direction
 PhoneBridge is a free/open-source project intended for personal use and public sharing.
@@ -112,7 +112,7 @@ Reuse only where it provides functionality not already better supplied by the se
 - [x] Add SHA-256 certificate fingerprint display support.
 - [x] Add persistent trusted-peer storage model.
 - [x] Add a TLS pairing listener on port `1716`.
-- [ ] Wire TLS listener decisions directly to the production pairing UI.
+- [x] Wire TLS listener decisions directly to the production pairing UI.
 - [ ] Pin exact KDE Connect Android/desktop versions or commits.
 - [ ] Map PhoneBridge files to KDE Connect equivalents.
 - [ ] Identify reusable/adaptable/removable source components.
@@ -122,9 +122,13 @@ Reuse only where it provides functionality not already better supplied by the se
 - [x] Establish initial KDE Connect-compatible packet model.
 - [x] Establish initial KDE Connect-compatible pairing state model.
 - [x] Establish PC TLS transport substrate.
+- [x] Exchange certificate fingerprints inside Hello/HelloAck on the active control channel (2026-08-26).
+- [x] Route pairing Allow/Reject decisions through the desktop UI backed by TrustStore (2026-08-26).
+- [x] Pin PC certificate fingerprints on Android per host (TOFU) with HelloAck cross-check (2026-08-26).
 - [ ] Replace old PhoneBridge Hello/HelloAck pairing protocol with KDE Connect-compatible path.
+- [ ] Add mutual TLS client-certificate authentication (Android must present its certificate during the handshake itself; fingerprint verification is currently at the protocol layer only).
 - [ ] Add Android packet/session implementation.
-- [ ] Establish real Android ↔ desktop pairing.
+- [ ] Establish real Android ↔ desktop pairing end-to-end on real hardware.
 - [ ] Establish discovery.
 - [ ] Establish reconnect.
 - [ ] Enable mutual peer certificate authentication after Android certificate support exists.
@@ -187,24 +191,24 @@ The new TLS layer provides:
 **Current limitation:** the TLS listener uses server-authenticated TLS only. Android peer certificate authentication and GUI-controlled network Allow/Reject response are the next security/pairing integration step. Do not call this production-secure pairing yet.
 
 ## Build/test status
-### Latest user-provided Windows verification
-User ran:
+### Latest Windows verification (2026-08-26, cargo 1.97.1)
+From `pc/` on `feature/kdeconnect-core`:
 ```text
-cargo check
+cargo check   # passes (warnings only, no errors)
+cargo test    # 16 tests pass across lib + both bins, including new protocol fingerprint tests
 ```
-from `pc/` on `feature/kdeconnect-core` and confirmed that it **passes** after the previous pairing fixes.
 
-The newly added TLS files have **not yet been locally verified after this latest block**.
+The 2026-08-26 pairing block (fingerprint exchange, desktop Allow/Reject gate, Android pinning) is **build-verified on the PC side only**. The Kotlin changes (`PhoneIdentity.kt`, `TrustStore.kt`, `SignalingClient.kt`, `CallManager.kt`) are code-reviewed but **not build-verified** — no Android SDK was available on the machine where they were written.
 
 Next verification:
 ```text
+cd /d/GitHub/PhoneBridge/android
+gradlew :app:assembleDebug          # requires Android SDK
 cd /d/GitHub/PhoneBridge/pc
-cargo check
-cargo test
 cargo run --bin phonebridge-pairing-demo
 ```
 
-Do not mark the new TLS block as build-verified until the user runs these commands successfully.
+End-to-end pairing on two real devices is still untested and remains the gating milestone for Phase 2.
 
 ## Frozen custom stack
 The previous implementation contains Identity, TrustStore, custom TLS server/client, custom pairing state, custom discovery, ConnectionManager, route persistence, Windows RFCOMM transport bridge, and desktop pairing GUI.
@@ -225,4 +229,4 @@ Before deleting or replacing old components:
 ## Handoff
 Read this file first before continuing development.
 
-**Immediate next task:** locally build/test the TLS block, then connect Android identity/pair packets to the TLS session and route network pairing decisions through the desktop UI. After that implement persistent peer certificates and mutual TLS trust.
+**Immediate next task:** build the Android side (SDK required) and run a first end-to-end pairing on two devices: PC shows the Allow/Reject dialog with short codes, phone pins the PC certificate, calls/media/SMS flow over the trusted session. After that add mutual TLS client-certificate authentication so fingerprints are verified inside the handshake itself instead of at the protocol layer.

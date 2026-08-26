@@ -1,10 +1,11 @@
 use crate::protocol::{HfpSupport, MediaCommand, MediaPlaybackState, Message};
 use crate::sms::{SmsController, SmsStore};
-use crate::ui::UiBackend;
+use crate::ui::{PairingRequest, UiBackend};
 use async_trait::async_trait;
 use eframe::egui;
 use std::sync::{Arc, Mutex};
 use tokio::runtime::Handle;
+use tokio::sync::oneshot;
 
 pub struct DesktopState {
     pub connected: bool,
@@ -20,6 +21,11 @@ pub struct DesktopState {
     pub media_album: String,
     pub sms_notice: String,
     pub sms_error: String,
+    /// Short code of this PC certificate, shown so the user can compare it
+    /// against the phone screen during pairing.
+    pub local_code: String,
+    /// Pairing attempts waiting for an explicit Allow/Reject decision.
+    pub pending_pairing: Vec<(PairingRequest, oneshot::Sender<bool>)>,
 }
 
 impl Default for DesktopState {
@@ -38,6 +44,8 @@ impl Default for DesktopState {
             media_album: String::new(),
             sms_notice: String::new(),
             sms_error: String::new(),
+            local_code: String::new(),
+            pending_pairing: Vec::new(),
         }
     }
 }
@@ -95,6 +103,14 @@ impl UiBackend for DesktopUi {
     async fn notify_sms_error(&self, error: &str) {
         self.state.lock().unwrap().sms_error = error.to_string();
     }
+
+    async fn request_pairing_decision(&self, request: PairingRequest) -> bool {
+        let (tx, rx) = oneshot::channel();
+        self.state.lock().unwrap().pending_pairing.push((request, tx));
+        // Park the connection task until the user answers in the GUI thread.
+        // A dropped responder (state reset) counts as rejection.
+        matches!(rx.await, Ok(true))
+    }
 }
 
 pub struct PhoneBridgeApp {
@@ -121,15 +137,27 @@ impl PhoneBridgeApp {
         let controller = self.controller.clone();
         self.runtime.spawn(async move { let _ = controller.request_history().await; });
     }
+
+    fn resolve_pairing(&self, index: usize, accepted: bool) {
+        // The index comes from the last rendered frame; re-validate under the
+        // lock because the pending list may have changed since.
+        let entry = {
+            let mut s = self.state.lock().unwrap();
+            if index >= s.pending_pairing.len() { return; }
+            s.pending_pairing.remove(index)
+        };
+        let (_request, tx) = entry;
+        let _ = tx.send(accepted);
+    }
 }
 
 impl eframe::App for PhoneBridgeApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.request_repaint_after(std::time::Duration::from_millis(250));
 
-        let (connected, peer_name, hfp, caller_name, caller_number, ringing, media_state, media_title, media_artist, media_album, sms_notice, sms_error) = {
+        let (connected, peer_name, hfp, caller_name, caller_number, ringing, media_state, media_title, media_artist, media_album, sms_notice, sms_error, local_code) = {
             let state = self.state.lock().unwrap();
-            (state.connected, state.peer_name.clone(), state.hfp, state.caller_name.clone(), state.caller_number.clone(), state.ringing, state.media_state, state.media_title.clone(), state.media_artist.clone(), state.media_album.clone(), state.sms_notice.clone(), state.sms_error.clone())
+            (state.connected, state.peer_name.clone(), state.hfp, state.caller_name.clone(), state.caller_number.clone(), state.ringing, state.media_state, state.media_title.clone(), state.media_artist.clone(), state.media_album.clone(), state.sms_notice.clone(), state.sms_error.clone(), state.local_code.clone())
         };
 
         egui::TopBottomPanel::top("top").show(ctx, |ui| {
@@ -139,6 +167,8 @@ impl eframe::App for PhoneBridgeApp {
                 ui.label(if connected { format!("● {}", peer_name) } else { "○ Телефон не подключён".into() });
                 ui.separator();
                 ui.label(format!("HFP: {:?}", hfp));
+                ui.separator();
+                if !local_code.is_empty() { ui.label(format!("Код ПК: {local_code}")); }
             });
         });
 
@@ -203,5 +233,38 @@ impl eframe::App for PhoneBridgeApp {
                 self.send(Message::SmsSend { address, body });
             }
         });
+
+        // Pairing dialog: shown above everything while a decision is pending.
+        let pending: Vec<(usize, PairingRequest)> = {
+            let state = self.state.lock().unwrap();
+            state.pending_pairing.iter().enumerate().map(|(i, (r, _))| (i, r.clone())).collect()
+        };
+        if !pending.is_empty() {
+            egui::Window::new("Сопряжение устройства")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.label("Новое устройство запрашивает доступ к этому ПК.");
+                    ui.add_space(4.0);
+                    for (_idx, request) in &pending {
+                        ui.strong(format!("Устройство: {}", request.device_name));
+                        ui.label(format!("ID: {}", request.device_id));
+                        ui.add_space(4.0);
+                        ui.label("Сверьте коды безопасности на обоих устройствах:");
+                        ui.monospace(format!("Телефон: {}", request.peer_code));
+                        ui.monospace(format!("Этот ПК: {}", request.local_code));
+                        ui.add_space(8.0);
+                    }
+                    ui.horizontal(|ui| {
+                        if ui.add(egui::Button::new("Разрешить")).clicked() {
+                            self.resolve_pairing(pending[0].0, true);
+                        }
+                        if ui.add(egui::Button::new("Отклонить")).clicked() {
+                            self.resolve_pairing(pending[0].0, false);
+                        }
+                    });
+                });
+        }
     }
 }

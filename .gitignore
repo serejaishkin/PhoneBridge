@@ -4,3 +4,4 @@
 /android/local.properties
 *.iml
 .idea/
+/.tools/

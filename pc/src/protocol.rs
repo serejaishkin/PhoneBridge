@@ -1,7 +1,11 @@
-//! Общий протокол сообщений PC <-> Android поверх WebSocket/TLS-соединения.
+//! Common control-plane protocol spoken between PC and Android.
 //!
-//! Формат: одна JSON-строка на сообщение, разделитель — '\n'.
-//! Control-plane содержит только звонки, медиа и SMS. Аудиопоток сюда не входит.
+//! Transport: TLS stream carrying newline-delimited JSON (one message per line).
+//! The control plane covers pairing, calls, media state and SMS. Raw audio is out of scope here.
+//!
+//! Trust model: both sides own a persistent self-signed certificate. The SHA-256
+//! fingerprint of that certificate travels inside Hello/HelloAck so each side can
+//! pin and verify the peer (see pc/src/pairing/trust.rs and the Android TrustStore).
 
 use serde::{Deserialize, Serialize};
 
@@ -13,11 +17,18 @@ pub enum Message {
         device_name: String,
         platform: String,
         protocol_version: u32,
+        /// SHA-256 hex fingerprint of the sender certificate. Optional on the wire so
+        /// older builds still parse, but the PC rejects sessions without it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cert_fingerprint: Option<String>,
     },
     HelloAck {
         device_id: String,
         device_name: String,
         trusted: bool,
+        /// SHA-256 hex fingerprint of the PC certificate; lets the phone pin the PC.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        cert_fingerprint: String,
     },
     Ping,
     Pong,
@@ -28,9 +39,9 @@ pub enum Message {
     CallEnded,
     CallAnswer,
     CallDecline,
-    /// PC -> Android: управление активной MediaSession.
+    /// PC -> Android: control command for the active MediaSession.
     MediaCommand { command: MediaCommand },
-    /// Android -> PC: состояние активной MediaSession.
+    /// Android -> PC: state of the active MediaSession.
     MediaState {
         package: Option<String>,
         state: MediaPlaybackState,
@@ -38,23 +49,23 @@ pub enum Message {
         artist: Option<String>,
         album: Option<String>,
     },
-    /// Android -> PC: входящее SMS.
+    /// Android -> PC: incoming SMS.
     #[serde(rename = "sms_received")]
     SmsReceived {
         address: String,
         body: String,
         timestamp: i64,
     },
-    /// PC -> Android: отправить SMS.
+    /// PC -> Android: send an SMS.
     #[serde(rename = "sms_send")]
     SmsSend {
         address: String,
         body: String,
     },
-    /// PC -> Android: запросить последние входящие SMS.
+    /// PC -> Android: request recent incoming SMS history.
     #[serde(rename = "sms_list")]
     SmsList,
-    /// Android -> PC: один элемент истории SMS.
+    /// Android -> PC: one item of SMS history.
     #[serde(rename = "sms_item")]
     SmsItem {
         id: String,
@@ -62,7 +73,7 @@ pub enum Message {
         body: String,
         timestamp: i64,
     },
-    /// Android -> PC: конец ответа на sms_list.
+    /// Android -> PC: end of sms_list response.
     #[serde(rename = "sms_list_end")]
     SmsListEnd { count: u32 },
     #[serde(rename = "sms_sent")]
@@ -131,6 +142,55 @@ mod tests {
             Message::SmsSend { address, body } => {
                 assert_eq!(address, "+79991234567");
                 assert_eq!(body, "hello");
+            }
+            other => panic!("unexpected message: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn hello_round_trips_with_fingerprint() {
+        let message = Message::Hello {
+            device_id: "pb2-abc".into(),
+            device_name: "Pixel".into(),
+            platform: "android".into(),
+            protocol_version: 1,
+            cert_fingerprint: Some("deadbeef".into()),
+        };
+        let line = message.to_line().unwrap();
+        let decoded = Message::from_line(&line).unwrap();
+        match decoded {
+            Message::Hello { cert_fingerprint, .. } => {
+                assert_eq!(cert_fingerprint.as_deref(), Some("deadbeef"));
+            }
+            other => panic!("unexpected message: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn hello_without_fingerprint_still_parses() {
+        let line = "{\"type\":\"Hello\",\"data\":{\"device_id\":\"d\",\"device_name\":\"n\",\"platform\":\"android\",\"protocol_version\":1}}\n";
+        let decoded = Message::from_line(line).unwrap();
+        match decoded {
+            Message::Hello { cert_fingerprint, .. } => assert!(cert_fingerprint.is_none()),
+            other => panic!("unexpected message: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn hello_ack_carries_pc_fingerprint() {
+        let message = Message::HelloAck {
+            device_id: "pb2-pc".into(),
+            device_name: "DESKTOP".into(),
+            trusted: true,
+            cert_fingerprint: "cafebabe".into(),
+        };
+        let line = message.to_line().unwrap();
+        assert!(line.contains("\"cert_fingerprint\":\"cafebabe\""));
+        let decoded = Message::from_line(&line).unwrap();
+        match decoded {
+            Message::HelloAck { trusted, cert_fingerprint, .. } => {
+                assert!(trusted);
+                assert_eq!(cert_fingerprint, "cafebabe");
             }
             other => panic!("unexpected message: {other:?}"),
         }

@@ -53,9 +53,13 @@
 
 ## Известные слабые места в текущем скелете (честно)
 
-- В `pairing/server.rs` fingerprint клиента пока не сверяется по-настоящему —
-  TLS принимает соединение без client-auth, а сверка вынесена в TODO
-  (нужно перейти на `with_client_cert_verifier()` в rustls, см. комментарий в файле).
+- ~~В `pairing/server.rs` fingerprint клиента пока не сверяется по-настоящему~~
+  **Исправлено 2026-08-26**: Hello теперь несёт `cert_fingerprint`, сервер сверяет
+  пару (device_id, fingerprint) по TrustStore, а первое подключение проходит через
+  Allow/Reject-диалог десктопного UI с short_code. Android шлёт fingerprint своего
+  персистентного сертификата (`pairing/PhoneIdentity.kt`) и пинит сертификат PC
+  по хосту (TOFU) с перекрёстной сверкой по `HelloAck`. Осталось: взаимная
+  клиентская TLS-аутентификация на уровне handshake (см. DEVELOPMENT_MAP, Phase 2).
 - Kotlin-сторона протокола (`Protocol.kt`) не протестирована на побайтовое
   совпадение JSON с Rust-стороной (`serde` с `tag`/`content` vs kotlinx.serialization
   polymorphic) — см. предупреждение в конце файла. Первое, что стоит сделать

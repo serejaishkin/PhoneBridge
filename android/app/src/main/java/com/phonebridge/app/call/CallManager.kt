@@ -3,36 +3,64 @@ package com.phonebridge.app.call
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.Handler
+import android.os.Looper
 import android.telecom.TelecomManager
 import android.telephony.PhoneStateListener
 import android.telephony.TelephonyManager
+import android.widget.Toast
 import androidx.core.content.ContextCompat
 import com.phonebridge.app.media.MediaControllerBridge
 import com.phonebridge.app.network.SignalingClient
+import com.phonebridge.app.pairing.PhoneIdentity
+import com.phonebridge.app.pairing.TrustStore
 import com.phonebridge.app.sms.SmsBridge
 
 /** Phone-side control endpoint for calls + media + SMS. */
 class CallManager(private val context: Context) {
-    private val telephonyManager = context.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
-    private val signalingClient = SignalingClient { type, data ->
-        when (type) {
-            "call_answer" -> answerCall()
-            "call_decline" -> endCall()
-            "media_command" -> {
-                val command = when (data["command"]) {
-                    "Play" -> "media_play"
-                    "Pause" -> "media_pause"
-                    "PlayPause" -> "media_play_pause"
-                    "Next" -> "media_next"
-                    "Previous" -> "media_previous"
-                    else -> ""
-                }
-                if (command.isNotEmpty()) MediaControllerBridge.handleCommand(command)
-            }
-            "sms_send" -> SmsBridge.sendFromCommand(data)
-            "sms_list" -> SmsBridge.publishRecent()
-        }
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    // Lazy providers evaluated inside the connection worker thread: RSA keygen
+    // for the identity must not run on the Android main thread.
+    private val identityProvider: () -> PhoneIdentity = { PhoneIdentity.loadOrCreate(context) }
+    private val trustProvider: () -> TrustStore = { TrustStore.load(context) }
+
+    private fun toast(message: String) {
+        mainHandler.post { Toast.makeText(context, message, Toast.LENGTH_LONG).show() }
     }
+
+    private val signalingClient = SignalingClient(
+        onCommand = { type, data ->
+            when (type) {
+                "call_answer" -> answerCall()
+                "call_decline" -> endCall()
+                "media_command" -> {
+                    val command = when (data["command"]) {
+                        "Play" -> "media_play"
+                        "Pause" -> "media_pause"
+                        "PlayPause" -> "media_play_pause"
+                        "Next" -> "media_next"
+                        "Previous" -> "media_previous"
+                        else -> ""
+                    }
+                    if (command.isNotEmpty()) MediaControllerBridge.handleCommand(command)
+                }
+                "sms_send" -> SmsBridge.sendFromCommand(data)
+                "sms_list" -> SmsBridge.publishRecent()
+            }
+        },
+        onStatus = { status, _ ->
+            when (status) {
+                "first_connection" -> toast("Первое подключение к ПК. Сверьте код сопряжения на экране ПК")
+                "connected_unverified" -> Unit // already announced via first_connection
+                "pairing_rejected" -> toast("ПК отклонил сопряжение")
+                "certificate_mismatch" -> toast("Сертификат ПК изменился! Подключение прервано")
+                else -> Unit
+            }
+        },
+        identityProvider = identityProvider,
+        trustProvider = trustProvider
+    )
 
     private val phoneStateListener = object : PhoneStateListener() {
         override fun onCallStateChanged(state: Int, phoneNumber: String?) {
