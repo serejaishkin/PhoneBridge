@@ -125,6 +125,7 @@ Reuse only where it provides functionality not already better supplied by the se
 - [x] Exchange certificate fingerprints inside Hello/HelloAck on the active control channel (2026-08-26).
 - [x] Route pairing Allow/Reject decisions through the desktop UI backed by TrustStore (2026-08-26).
 - [x] Pin PC certificate fingerprints on Android per host (TOFU) with HelloAck cross-check (2026-08-26).
+- [x] Real Windows HFP support detection via WinRT RFCOMM service cache; Linux/macOS still stubbed as Unknown (2026-08-26).
 - [ ] Replace old PhoneBridge Hello/HelloAck pairing protocol with KDE Connect-compatible path.
 - [ ] Add mutual TLS client-certificate authentication (Android must present its certificate during the handshake itself; fingerprint verification is currently at the protocol layer only).
 - [ ] Add Android packet/session implementation.

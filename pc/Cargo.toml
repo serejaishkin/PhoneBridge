@@ -27,6 +27,7 @@ opus = "0.3"
 crossbeam-channel = "0.5"
 parking_lot = "0.12"
 tokio-tungstenite = "0.23"
+windows = { version = "0.62.2", default-features = false, features = ["Devices_Bluetooth", "Devices_Bluetooth_Rfcomm", "Devices_Enumeration", "Foundation", "Win32_Foundation"] }
 
 [[bin]]
 name = "phonebridge2"
