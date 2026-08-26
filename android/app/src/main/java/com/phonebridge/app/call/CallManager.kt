@@ -2,6 +2,7 @@ package com.phonebridge.app.call
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
@@ -20,15 +21,11 @@ import com.phonebridge.app.sms.SmsBridge
 /** Phone-side control endpoint for calls + media + SMS. */
 class CallManager(private val context: Context) {
     private val mainHandler = Handler(Looper.getMainLooper())
-
-    // Lazy providers evaluated inside the connection worker thread: RSA keygen
-    // for the identity must not run on the Android main thread.
+    private val telephonyManager: TelephonyManager by lazy { context.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager }
     private val identityProvider: () -> PhoneIdentity = { PhoneIdentity.loadOrCreate(context) }
     private val trustProvider: () -> TrustStore = { TrustStore.load(context) }
 
-    private fun toast(message: String) {
-        mainHandler.post { Toast.makeText(context, message, Toast.LENGTH_LONG).show() }
-    }
+    private fun toast(message: String) { mainHandler.post { Toast.makeText(context, message, Toast.LENGTH_LONG).show() } }
 
     private val signalingClient = SignalingClient(
         onCommand = { type, data ->
@@ -37,12 +34,8 @@ class CallManager(private val context: Context) {
                 "call_decline" -> endCall()
                 "media_command" -> {
                     val command = when (data["command"]) {
-                        "Play" -> "media_play"
-                        "Pause" -> "media_pause"
-                        "PlayPause" -> "media_play_pause"
-                        "Next" -> "media_next"
-                        "Previous" -> "media_previous"
-                        else -> ""
+                        "Play" -> "media_play"; "Pause" -> "media_pause"; "PlayPause" -> "media_play_pause"
+                        "Next" -> "media_next"; "Previous" -> "media_previous"; else -> ""
                     }
                     if (command.isNotEmpty()) MediaControllerBridge.handleCommand(command)
                 }
@@ -50,15 +43,11 @@ class CallManager(private val context: Context) {
                 "sms_list" -> SmsBridge.publishRecent()
             }
         },
-        onStatus = { status, _ ->
-            when (status) {
-                "first_connection" -> toast("Первое подключение к ПК. Сверьте код сопряжения на экране ПК")
-                "connected_unverified" -> Unit // already announced via first_connection
-                "pairing_rejected" -> toast("ПК отклонил сопряжение")
-                "certificate_mismatch" -> toast("Сертификат ПК изменился! Подключение прервано")
-                else -> Unit
-            }
-        },
+        onStatus = { status, _ -> when (status) {
+            "first_connection" -> toast("Первое подключение к ПК. Сверьте код сопряжения на экране ПК")
+            "pairing_rejected" -> toast("ПК отклонил сопряжение")
+            "certificate_mismatch" -> toast("Сертификат ПК изменился! Подключение прервано")
+        } },
         identityProvider = identityProvider,
         trustProvider = trustProvider
     )
@@ -83,16 +72,10 @@ class CallManager(private val context: Context) {
         signalingClient.disconnect()
     }
 
-    /**
-     * Toggle the PC microphone relay: asks the PC to start/stop streaming its
-     * microphone and runs/stops the local playback service (UDP :5003).
-     */
+    /** Toggle the PC microphone relay and the local playback endpoint. */
     fun setPcMicrophone(enabled: Boolean) {
-        if (enabled) {
-            context.startForegroundService(Intent(context, AudioPlaybackService::class.java))
-        } else {
-            context.stopService(Intent(context, AudioPlaybackService::class.java))
-        }
+        if (enabled) context.startForegroundService(Intent(context, AudioPlaybackService::class.java))
+        else context.stopService(Intent(context, AudioPlaybackService::class.java))
         signalingClient.sendEvent(if (enabled) "mic_start" else "mic_stop", emptyMap())
     }
 
