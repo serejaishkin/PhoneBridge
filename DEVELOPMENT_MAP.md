@@ -130,7 +130,7 @@ Reuse only where it provides functionality not already better supplied by the se
 - [x] macOS HFP support detection via IOBluetooth; module compile-verified under aarch64-apple-darwin, runtime test on a real Mac still pending (2026-08-26).
 - [x] Restore system tray for Windows/macOS via tray-icon inside the eframe creator closure; Linux tray deferred due to GTK/winit main-thread conflict — eframe window is the Linux UI for now (2026-08-26).
 - [ ] Replace old PhoneBridge Hello/HelloAck pairing protocol with KDE Connect-compatible path.
-- [ ] Add mutual TLS client-certificate authentication (Android must present its certificate during the handshake itself; fingerprint verification is currently at the protocol layer only).
+- [x] Add mutual TLS client-certificate authentication on the PC side: client certs are required during the handshake, the fingerprint is taken from the negotiated TLS session and cross-checked against Hello; covered by integration tests including a certless-client rejection case (2026-08-26). Android now presents its certificate via an X509KeyManager, but the Kotlin changes are still not build-verified.
 - [ ] Add Android packet/session implementation.
 - [ ] Establish real Android ↔ desktop pairing end-to-end on real hardware.
 - [ ] Establish discovery.

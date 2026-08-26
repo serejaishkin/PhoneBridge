@@ -11,19 +11,24 @@ import java.io.OutputStreamWriter
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.security.MessageDigest
+import java.security.Principal
+import java.security.PrivateKey
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.UUID
+import javax.net.ssl.KeyManager
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocket
+import javax.net.ssl.X509ExtendedKeyManager
 import javax.net.ssl.X509TrustManager
 
 /**
  * TLS + newline-delimited JSON control client matching pc/src/protocol.rs.
  *
- * Security model:
- * - The phone sends its persistent certificate fingerprint inside Hello so the
- *   PC can run the pairing gate (desktop Allow/Reject) and pin the device.
+ * Security model (mutual TLS):
+ * - The phone presents its persistent certificate during the handshake itself;
+ *   Hello additionally carries the fingerprint so the PC can cross-check that
+ *   the claimed device id belongs to the authenticated certificate.
  * - The server certificate is pinned per host on first connect (TOFU); later
  *   connections require an exact match. The HelloAck fingerprint is cross-checked
  *   against the pinned value to defend against a different machine reusing the IP.
@@ -40,6 +45,30 @@ class SignalingClient(
     @Volatile private var currentHost: String? = null
     @Volatile private var firstConnection = false
 
+    /**
+     * Presents the persistent device certificate during mutual TLS so the PC can
+     * verify proof-of-possession before any protocol message is exchanged.
+     */
+    private class IdentityKeyManager(private val identity: PhoneIdentity) : X509ExtendedKeyManager() {
+        companion object { const val ALIAS = "phonebridge-identity" }
+
+        override fun getClientAliases(keyType: String?, issuers: Array<out Principal>?) =
+            if (keyType == "RSA") arrayOf(ALIAS) else emptyArray<String>()
+
+        override fun chooseClientAlias(keyType: Array<out String>?, issuers: Array<out Principal>?, socket: Socket?): String? =
+            if (keyType?.contains("RSA") == true) ALIAS else null
+
+        override fun getCertificateChain(alias: String?): Array<X509Certificate>? =
+            if (alias == ALIAS) identity.certificateChain() else null
+
+        override fun getPrivateKey(alias: String?): PrivateKey? =
+            if (alias == ALIAS) identity.privateKey() else null
+
+        // This client never acts as a TLS server.
+        override fun getServerAliases(keyType: String?, issuers: Array<out Principal>?): Array<String>? = null
+        override fun chooseServerAlias(keyType: String?, issuers: Array<out Principal>?, socket: Socket?): String? = null
+    }
+
     fun connect(url: String) { Thread { runCatching { open(url, 5_000) } }.start() }
 
     fun connectBlocking(url: String, timeoutMs: Long = 5_000): Boolean = try {
@@ -53,6 +82,7 @@ class SignalingClient(
         val (host, port) = parseTarget(url)
         currentHost = host
         val trustStore = trustProvider()
+        val identity = identityProvider()
 
         // Pin the expected PC certificate fingerprint for this host. The first
         // connection records it (trust-on-first-use); later ones must match.
@@ -75,7 +105,8 @@ class SignalingClient(
         }
 
         val context = SSLContext.getInstance("TLS").apply {
-            init(null, arrayOf(pinningTrustManager), SecureRandom())
+            val keyManagers: Array<KeyManager>? = identity?.let { arrayOf<KeyManager>(IdentityKeyManager(it)) }
+            init(keyManagers, arrayOf(pinningTrustManager), SecureRandom())
         }
         val raw = Socket().apply { connect(InetSocketAddress(host, port), timeoutMs.toInt()) }
         val ssl = context.socketFactory.createSocket(raw, host, port, true) as SSLSocket

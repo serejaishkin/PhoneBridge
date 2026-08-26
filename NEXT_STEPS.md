@@ -67,12 +67,14 @@
 ## Известные слабые места в текущем скелете (честно)
 
 - ~~В `pairing/server.rs` fingerprint клиента пока не сверяется по-настоящему~~
-  **Исправлено 2026-08-26**: Hello теперь несёт `cert_fingerprint`, сервер сверяет
-  пару (device_id, fingerprint) по TrustStore, а первое подключение проходит через
-  Allow/Reject-диалог десктопного UI с short_code. Android шлёт fingerprint своего
-  персистентного сертификата (`pairing/PhoneIdentity.kt`) и пинит сертификат PC
-  по хосту (TOFU) с перекрёстной сверкой по `HelloAck`. Осталось: взаимная
-  клиентская TLS-аутентификация на уровне handshake (см. DEVELOPMENT_MAP, Phase 2).
+  **Исправлено полностью 2026-08-26 — взаимный TLS**: телефон обязан предъявить
+  сертификат в самом handshake (`X509KeyManager` на Android, кастомный
+  `ClientCertVerifier` на PC), fingerprint берётся из согласованной TLS-сессии и
+  сверяется с заявленным в Hello; доверенная пара (device_id, fingerprint)
+  сохраняется в TrustStore после Allow/Reject-диалога с short_code; TOFU-пин
+  сертификата PC по хосту с перекрёстной сверкой по `HelloAck`. Весь конвейер
+  покрыт интеграционными тестами на PC-стороне (включая отказ клиента без
+  сертификата). Осталось: собрать Android и прогнать пейринг на живой паре устройств.
 - Kotlin-сторона протокола (`Protocol.kt`) не протестирована на побайтовое
   совпадение JSON с Rust-стороной (`serde` с `tag`/`content` vs kotlinx.serialization
   polymorphic) — см. предупреждение в конце файла. Первое, что стоит сделать

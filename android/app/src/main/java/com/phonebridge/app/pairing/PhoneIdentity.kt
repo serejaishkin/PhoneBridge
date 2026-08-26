@@ -2,12 +2,17 @@ package com.phonebridge.app.pairing
 
 import android.content.Context
 import android.util.Base64
+import java.io.ByteArrayInputStream
 import java.io.File
 import java.math.BigInteger
+import java.security.KeyFactory
 import java.security.KeyPairGenerator
 import java.security.MessageDigest
+import java.security.PrivateKey
 import java.security.SecureRandom
+import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
+import java.security.spec.PKCS8EncodedKeySpec
 import java.util.Date
 import javax.security.auth.x500.X500Principal
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
@@ -25,13 +30,23 @@ import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
 class PhoneIdentity private constructor(
     val deviceId: String,
     val certDer: ByteArray,
-    @Suppress("unused") private val certPem: String,
-    @Suppress("unused") private val privateKeyPem: String
+    private val privateKeyDer: ByteArray
 ) {
     /** SHA-256 hex fingerprint of the DER-encoded certificate. */
     fun fingerprintHex(): String {
         val digest = MessageDigest.getInstance("SHA-256").digest(certDer)
         return digest.joinToString("") { "%02x".format(it) }
+    }
+
+    /** Parsed RSA private key for TLS client-certificate authentication. */
+    fun privateKey(): PrivateKey =
+        KeyFactory.getInstance("RSA").generatePrivate(PKCS8EncodedKeySpec(privateKeyDer))
+
+    /** One-element chain with this device's self-signed certificate. */
+    fun certificateChain(): Array<X509Certificate> {
+        val factory = CertificateFactory.getInstance("X.509")
+        @Suppress("UNCHECKED_CAST")
+        return factory.generateCertificates(ByteArrayInputStream(certDer)).toTypedArray() as Array<X509Certificate>
     }
 
     companion object {
@@ -46,8 +61,7 @@ class PhoneIdentity private constructor(
             val idFile = File(dir, ID_FILE)
 
             if (certFile.exists() && keyFile.exists() && idFile.exists()) {
-                val certPem = certFile.readText()
-                return PhoneIdentity(idFile.readText().trim(), pemToDer(certPem), certPem, keyFile.readText())
+                return loadExisting(certFile, keyFile, idFile)
             }
 
             // Same id format as the PC side ("pb2-" + hex).
@@ -63,15 +77,22 @@ class PhoneIdentity private constructor(
             val signer = JcaContentSignerBuilder("SHA256withRSA").build(keyPair.private)
             val cert: X509Certificate = JcaX509CertificateConverter().getCertificate(certBuilder.build(signer))
 
-            val certDer = cert.encoded
-            val certPem = derToPem(certDer, "CERTIFICATE")
-            val keyPem = derToPem(keyPair.private.encoded, "PRIVATE KEY")
-
-            certFile.writeText(certPem)
-            keyFile.writeText(keyPem)
+            certFile.writeText(derToPem(cert.encoded, "CERTIFICATE"))
+            // PKCS#8 ("PRIVATE KEY") so KeyFactory can consume it without conversion.
+            keyFile.writeText(derToPem(keyPair.private.encoded, "PRIVATE KEY"))
             idFile.writeText(deviceId)
 
-            return PhoneIdentity(deviceId, certDer, certPem, keyPem)
+            return loadExisting(certFile, keyFile, idFile)
+        }
+
+        private fun loadExisting(certFile: File, keyFile: File, idFile: File): PhoneIdentity {
+            val certPem = certFile.readText()
+            val keyPem = keyFile.readText()
+            return PhoneIdentity(
+                deviceId = idFile.readText().trim(),
+                certDer = pemToDer(certPem),
+                privateKeyDer = pemToDer(keyPem)
+            )
         }
 
         private fun derToPem(der: ByteArray, label: String): String {

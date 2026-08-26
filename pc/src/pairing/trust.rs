@@ -1,8 +1,8 @@
-//! Trust-on-first-use хранилище: device_id -> fingerprint сертификата, которому
-//! мы доверяем. При первом подключении неизвестного device_id пользователю
-//! показывается human-readable код (short_code) для сверки со вторым устройством
-//! (аналог safety number / номера сопряжения по Bluetooth), и только после
-//! явного подтверждения запись попадает в этот файл.
+//! Trust-on-first-use storage: device_id -> certificate fingerprint hex.
+//!
+//! On first connection from an unknown device_id the user sees a human-readable
+//! short code (see `short_code`) on both screens; only after an explicit
+//! confirmation does the entry land in this file.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -23,15 +23,13 @@ impl TrustStore {
         fs::create_dir_all(dir).context("creating trust store dir")?;
         let path = dir.join("trusted_peers.json");
         if !path.exists() {
-            return Ok(Self {
-                peers: HashMap::new(),
-                path,
-            });
+            return Ok(Self { peers: HashMap::new(), path });
         }
         let raw = fs::read_to_string(&path)?;
-        let mut store: Self = serde_json::from_str(&raw).unwrap_or_default();
-        store.path = path;
-        Ok(store)
+        // The file format is a bare id->fingerprint JSON object.
+        let peers: HashMap<String, String> =
+            serde_json::from_str(&raw).context("parsing trusted_peers.json")?;
+        Ok(Self { peers, path })
     }
 
     fn save(&self) -> Result<()> {
@@ -43,29 +41,61 @@ impl TrustStore {
     pub fn is_trusted(&self, device_id: &str, fingerprint_hex: &str) -> bool {
         self.peers
             .get(device_id)
-            .map(|fp| fp == fingerprint_hex)
+            .map(|stored| stored.eq_ignore_ascii_case(fingerprint_hex))
             .unwrap_or(false)
     }
 
-    /// Явно доверять этому device_id+fingerprint. Вызывается только после того,
-    /// как пользователь подтвердил short_code глазами на обоих устройствах.
+    /// Explicitly trust this device_id + fingerprint. Only called after the
+    /// user confirmed the short code visually on both devices.
     pub fn trust(&mut self, device_id: &str, fingerprint_hex: &str) -> Result<()> {
-        self.peers
-            .insert(device_id.to_string(), fingerprint_hex.to_string());
+        self.peers.insert(device_id.to_string(), fingerprint_hex.to_lowercase());
         self.save()
     }
 
     pub fn revoke(&mut self, device_id: &str) -> Result<()> {
-        self.peers.remove(device_id);
-        self.save()
+        if self.peers.remove(device_id).is_some() {
+            self.save()?;
+        }
+        Ok(())
     }
 }
 
-/// Человекочитаемый код для сверки при пейринге, например "3F9A-7B21".
-/// Android-сторона должна вычислять его по тому же алгоритму (первые 4 байта
-/// SHA-256 отпечатка сертификата, hex, сгруппированные по 4 символа).
+/// Human-readable pairing code, e.g. "3F9A-7B21": first 4 bytes of the SHA-256
+/// certificate fingerprint as hex, grouped by 4 characters. The Android side
+/// computes it with the same algorithm.
 pub fn short_code(fingerprint_hex: &str) -> String {
     let upper = fingerprint_hex.to_uppercase();
     let chunk: String = upper.chars().take(8).collect();
     format!("{}-{}", &chunk[0..4], &chunk[4..8])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn saved_store_round_trips_through_disk() {
+        let dir = std::env::temp_dir().join(format!("pb-trust-{}-{:?}", std::process::id(), std::thread::current().id()));
+        let _ = fs::remove_dir_all(&dir);
+        let mut store = TrustStore::load(&dir).unwrap();
+        assert!(!store.is_trusted("dev", "aa"));
+        store.trust("dev", "aabbccdd").unwrap();
+        drop(store);
+
+        let reloaded = TrustStore::load(&dir).unwrap();
+        assert!(reloaded.is_trusted("dev", "aabbccdd"));
+        assert!(reloaded.is_trusted("dev", "AABBCCDD"), "comparison must be case-insensitive");
+        assert!(!reloaded.is_trusted("dev", "ffee00"));
+        assert!(!reloaded.is_trusted("other", "aabbccdd"));
+
+        let mut reloaded = reloaded;
+        reloaded.revoke("dev").unwrap();
+        assert!(!TrustStore::load(&dir).unwrap().is_trusted("dev", "aabbccdd"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn short_code_groups_first_four_bytes() {
+        assert_eq!(short_code("3f9a7b21ff"), "3F9A-7B21");
+    }
 }
