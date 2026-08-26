@@ -26,6 +26,10 @@ pub struct DesktopState {
     /// Short code of this PC certificate, shown so the user can compare it
     /// against the phone screen during pairing.
     pub local_code: String,
+    /// Phone -> PC media-audio stream is currently flowing.
+    pub streaming: bool,
+    /// PC microphone is being relayed to the phone.
+    pub mic_active: bool,
     /// Pairing attempts waiting for an explicit Allow/Reject decision.
     pub pending_pairing: Vec<(PairingRequest, oneshot::Sender<bool>)>,
 }
@@ -47,6 +51,8 @@ impl Default for DesktopState {
             sms_notice: String::new(),
             sms_error: String::new(),
             local_code: String::new(),
+            streaming: false,
+            mic_active: false,
             pending_pairing: Vec::new(),
         }
     }
@@ -104,6 +110,10 @@ impl UiBackend for DesktopUi {
 
     async fn notify_sms_error(&self, error: &str) {
         self.state.lock().unwrap().sms_error = error.to_string();
+    }
+
+    async fn notify_mic_state(&self, active: bool) {
+        self.state.lock().unwrap().mic_active = active;
     }
 
     async fn request_pairing_decision(&self, request: PairingRequest) -> bool {
@@ -193,9 +203,9 @@ impl eframe::App for PhoneBridgeApp {
             }
         }
 
-        let (connected, peer_name, hfp, caller_name, caller_number, ringing, media_state, media_title, media_artist, media_album, sms_notice, sms_error, local_code) = {
+        let (connected, peer_name, hfp, caller_name, caller_number, ringing, media_state, media_title, media_artist, media_album, sms_notice, sms_error, local_code, streaming, mic_active) = {
             let state = self.state.lock().unwrap();
-            (state.connected, state.peer_name.clone(), state.hfp, state.caller_name.clone(), state.caller_number.clone(), state.ringing, state.media_state, state.media_title.clone(), state.media_artist.clone(), state.media_album.clone(), state.sms_notice.clone(), state.sms_error.clone(), state.local_code.clone())
+            (state.connected, state.peer_name.clone(), state.hfp, state.caller_name.clone(), state.caller_number.clone(), state.ringing, state.media_state, state.media_title.clone(), state.media_artist.clone(), state.media_album.clone(), state.sms_notice.clone(), state.sms_error.clone(), state.local_code.clone(), state.streaming, state.mic_active)
         };
 
         egui::TopBottomPanel::top("top").show(ctx, |ui| {
@@ -205,6 +215,8 @@ impl eframe::App for PhoneBridgeApp {
                 ui.label(if connected { format!("● {}", peer_name) } else { "○ Телефон не подключён".into() });
                 ui.separator();
                 ui.label(format!("HFP: {:?}", hfp));
+                if streaming { ui.colored_label(egui::Color32::from_rgb(80, 200, 120), "♪ звук с телефона"); }
+                if mic_active { ui.colored_label(egui::Color32::from_rgb(240, 180, 60), "🎤 микрофон ПК → телефон"); }
                 ui.separator();
                 if !local_code.is_empty() { ui.label(format!("Код ПК: {local_code}")); }
             });

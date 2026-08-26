@@ -78,27 +78,45 @@ fn main() -> anyhow::Result<()> {
     // Opus-encodes it and streams UDP packets ([seq u16 BE][opus]) here.
     // Runs for the whole daemon lifetime; silence on the port is normal while
     // the phone is not casting.
+    let stream_activity = network::udp_server::StreamActivity::default();
     {
-        let ui = ui.clone();
+        runtime.spawn({
+            let activity = stream_activity.clone();
+            async move {
+                let jitter = Arc::new(tokio::sync::Mutex::new(audio::jitter_buffer::JitterBuffer::new(4, 32)));
+                let decoder = match audio::decoder::OpusDecoder::new() {
+                    Ok(decoder) => decoder,
+                    Err(e) => {
+                        log::error!("media audio disabled, opus decoder init failed: {e}");
+                        return;
+                    }
+                };
+                let server = match network::udp_server::UdpServer::new("0.0.0.0:5001", jitter, decoder, activity).await {
+                    Ok(server) => server,
+                    Err(e) => {
+                        log::error!("media audio disabled, cannot bind UDP :5001 ({e})");
+                        return;
+                    }
+                };
+                log::info!("media audio listening on udp/:5001");
+                server.run().await;
+            }
+        });
+    }
+
+    // Reflect stream liveness in the UI: active while packets keep arriving.
+    {
+        let state = desktop_state.clone();
+        let activity = stream_activity.clone();
         runtime.spawn(async move {
-            let jitter = Arc::new(tokio::sync::Mutex::new(audio::jitter_buffer::JitterBuffer::new(4, 32)));
-            let decoder = match audio::decoder::OpusDecoder::new() {
-                Ok(decoder) => decoder,
-                Err(e) => {
-                    log::error!("media audio disabled, opus decoder init failed: {e}");
-                    return;
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                let streaming = activity.is_active();
+                let mut guard = state.lock().unwrap();
+                if guard.streaming != streaming {
+                    guard.streaming = streaming;
                 }
-            };
-            let server = match network::udp_server::UdpServer::new("0.0.0.0:5001", jitter, decoder).await {
-                Ok(server) => server,
-                Err(e) => {
-                    let _ = &ui;
-                    log::error!("media audio disabled, cannot bind UDP :5001 ({e})");
-                    return;
-                }
-            };
-            log::info!("media audio listening on udp/:5001");
-            server.run().await;
+            }
         });
     }
 

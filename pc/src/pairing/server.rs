@@ -39,6 +39,9 @@ pub struct PairingServer {
     ui: Arc<dyn UiBackend>,
     sms_controller: SmsController,
     sms_store: Arc<Mutex<SmsStore>>,
+    /// Active microphone relay, if the phone asked for one. At most a single
+    /// relay exists at a time; it is stopped when the session ends.
+    mic_relay: Arc<Mutex<Option<crate::network::mic_relay::MicRelay>>>,
 }
 
 /// Accepts every client certificate presented during the handshake. This does
@@ -105,7 +108,15 @@ impl PairingServer {
             .with_client_cert_verifier(verifier)
             .with_single_cert(cert_der, key_der)
             .context("building TLS server config")?;
-        Ok(Self { acceptor: TlsAcceptor::from(Arc::new(config)), trust_store, identity, ui, sms_controller, sms_store })
+        Ok(Self {
+            acceptor: TlsAcceptor::from(Arc::new(config)),
+            trust_store,
+            identity,
+            ui,
+            sms_controller,
+            sms_store,
+            mic_relay: Arc::new(Mutex::new(None)),
+        })
     }
 
     pub async fn run(self) -> Result<()> {
@@ -125,8 +136,9 @@ impl PairingServer {
             let ui = self.ui.clone();
             let sms_controller = self.sms_controller.clone();
             let sms_store = self.sms_store.clone();
+            let mic_relay = self.mic_relay.clone();
             tokio::spawn(async move {
-                if let Err(e) = handle_connection(stream, acceptor, trust_store, identity, ui, sms_controller, sms_store).await {
+                if let Err(e) = handle_connection(stream, peer_addr, acceptor, trust_store, identity, ui, sms_controller, sms_store, mic_relay).await {
                     log::warn!("connection from {peer_addr} ended with error: {e}");
                 }
             });
@@ -134,7 +146,7 @@ impl PairingServer {
     }
 }
 
-async fn handle_connection(stream: tokio::net::TcpStream, acceptor: TlsAcceptor, trust_store: Arc<Mutex<TrustStore>>, identity: Arc<Identity>, ui: Arc<dyn UiBackend>, sms_controller: SmsController, sms_store: Arc<Mutex<SmsStore>>) -> Result<()> {
+async fn handle_connection(stream: tokio::net::TcpStream, peer_addr: std::net::SocketAddr, acceptor: TlsAcceptor, trust_store: Arc<Mutex<TrustStore>>, identity: Arc<Identity>, ui: Arc<dyn UiBackend>, sms_controller: SmsController, sms_store: Arc<Mutex<SmsStore>>, mic_relay: Arc<Mutex<Option<crate::network::mic_relay::MicRelay>>>) -> Result<()> {
     let tls_stream = acceptor.accept(stream).await.context("TLS handshake")?;
 
     // Authoritative peer fingerprint: taken from the negotiated TLS session,
@@ -239,6 +251,33 @@ async fn handle_connection(stream: tokio::net::TcpStream, acceptor: TlsAcceptor,
             Message::MediaState { package, state, title, artist, album } => {
                 ui.update_media_state(package.as_deref(), state, title.as_deref(), artist.as_deref(), album.as_deref()).await;
             }
+            Message::MicStart => {
+                let phone_ip = peer_addr.ip();
+                let mut slot = mic_relay.lock().await;
+                if slot.is_some() {
+                    log::info!("mic relay already running; ignoring duplicate MicStart");
+                    continue;
+                }
+                match crate::network::mic_relay::MicRelay::start(phone_ip) {
+                    Ok(relay) => {
+                        log::info!("mic relay active for {phone_ip}");
+                        *slot = Some(relay);
+                        ui.notify_mic_state(true).await;
+                    }
+                    Err(e) => {
+                        let message = format!("Не удалось включить микрофон ПК: {e:#}");
+                        log::error!("mic relay failed to start: {message}");
+                        ui.notify_sms_error(&message).await;
+                    }
+                }
+            }
+            Message::MicStop => {
+                if let Some(mut relay) = mic_relay.lock().await.take() {
+                    relay.stop();
+                    log::info!("mic relay stopped by phone");
+                    ui.notify_mic_state(false).await;
+                }
+            }
             Message::PhoneBluetoothStatus { .. }
             | Message::PcBluetoothStatus { .. }
             | Message::HelloAck { .. }
@@ -248,6 +287,10 @@ async fn handle_connection(stream: tokio::net::TcpStream, acceptor: TlsAcceptor,
         }
     }
 
+    // Session over: a microphone relay must never outlive its control session.
+    if let Some(mut relay) = mic_relay.lock().await.take() {
+        relay.stop();
+    }
     sms_controller.detach().await;
     writer_task.abort();
     ui.update_connection_status(false, Some(&peer_name)).await;

@@ -38,6 +38,8 @@ pub trait UiBackend: Send + Sync {
     async fn notify_sms_received(&self, address: &str, body: &str, timestamp: i64);
     async fn notify_sms_sent(&self, address: &str, body: &str);
     async fn notify_sms_error(&self, error: &str);
+    /// Phone-side microphone relay switched on/off.
+    async fn notify_mic_state(&self, active: bool);
     /// Ask the user to accept or reject a pairing attempt. Returns true when allowed.
     async fn request_pairing_decision(&self, request: PairingRequest) -> bool;
 }
@@ -54,6 +56,7 @@ impl UiBackend for HeadlessUi {
     async fn notify_sms_received(&self, address: &str, body: &str, timestamp: i64) { log::info!("[UI] SMS received: from={address} timestamp={timestamp}: {body}"); }
     async fn notify_sms_sent(&self, address: &str, body: &str) { log::info!("[UI] SMS sent: to={address}: {body}"); }
     async fn notify_sms_error(&self, error: &str) { log::warn!("[UI] SMS error: {error}"); }
+    async fn notify_mic_state(&self, active: bool) { log::info!("[UI] PC microphone relay: {active}"); }
     async fn request_pairing_decision(&self, request: PairingRequest) -> bool {
         // No interactive surface in headless mode; log loudly and auto-accept so
         // demos and tests keep working. Never use HeadlessUi on an untrusted network.

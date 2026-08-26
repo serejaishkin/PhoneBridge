@@ -27,6 +27,7 @@ class MainActivity : ComponentActivity() {
     private val callManager by lazy { CallManager(this) }
 
     private var pendingHost = "192.168.137.1"
+    private var micRelayEnabled by mutableStateOf(false)
 
     private val permissionsLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -56,6 +57,10 @@ class MainActivity : ComponentActivity() {
                         onStart = { host -> requestPermissions(host) },
                         onEnableMediaAccess = { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
                         onCastAudio = { requestAudioCaptureConsent() },
+                        onMicRelay = { enabled ->
+                            micRelayEnabled = enabled
+                            callManager.setPcMicrophone(enabled)
+                        },
                         onStop = { stopBridge() }
                     )
                 }
@@ -104,6 +109,8 @@ class MainActivity : ComponentActivity() {
         callManager.stop()
         bleAdvertiser.stop()
         stopService(Intent(this, AudioCaptureService::class.java))
+        stopService(Intent(this, AudioPlaybackService::class.java))
+        micRelayEnabled = false
         Toast.makeText(this, "PhoneBridge остановлен", Toast.LENGTH_SHORT).show()
     }
 
@@ -119,6 +126,7 @@ private fun MainScreen(
     onStart: (String) -> Unit,
     onEnableMediaAccess: () -> Unit,
     onCastAudio: () -> Unit,
+    onMicRelay: (Boolean) -> Unit,
     onStop: () -> Unit
 ) {
     var host by remember { mutableStateOf("192.168.137.1") }
@@ -141,6 +149,10 @@ private fun MainScreen(
         Button(onClick = { onStart(host) }) { Text("Подключить") }
         Spacer(Modifier.height(12.dp))
         Button(onClick = onCastAudio) { Text("Трансляция звука на ПК") }
+        Spacer(Modifier.height(12.dp))
+        OutlinedButton(onClick = { onMicRelay(!micRelayEnabled) }) {
+            Text(if (micRelayEnabled) "Выключить микрофон ПК" else "Включить микрофон ПК")
+        }
         Spacer(Modifier.height(12.dp))
         OutlinedButton(onClick = onEnableMediaAccess) { Text("Доступ к медиа") }
         Spacer(Modifier.height(12.dp))

@@ -80,6 +80,12 @@ pub enum Message {
     SmsSent { address: String, body: String },
     #[serde(rename = "sms_error")]
     SmsError { error: String },
+    /// Android -> PC: start relaying the PC microphone to the phone (:5003).
+    #[serde(rename = "mic_start")]
+    MicStart,
+    /// Android -> PC: stop the microphone relay.
+    #[serde(rename = "mic_stop")]
+    MicStop,
     PhoneBluetoothStatus { hfp_calls_toggle_enabled: bool },
     PcBluetoothStatus { hfp_supported: HfpSupport },
     Error { message: String },

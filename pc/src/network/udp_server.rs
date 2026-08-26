@@ -9,24 +9,45 @@
 
 use crate::audio::{decoder::OpusDecoder, jitter_buffer::JitterBuffer, output::AudioOutput};
 use crossbeam_channel::Sender;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
-use tokio::sync::Mutex;
+use tokio::sync::Mutex as AsyncMutex;
 
 pub const MEDIA_PORT: u16 = 5001;
 
+/// Shared marker of stream liveness: `Some(instant)` of the last received
+/// packet. The UI ticker treats a 2 s silence as "stream stopped".
+#[derive(Debug, Clone, Default)]
+pub struct StreamActivity(Arc<Mutex<Option<Instant>>>);
+
+impl StreamActivity {
+    pub fn is_active(&self) -> bool {
+        match self.0.lock().unwrap().as_ref() {
+            Some(last) => last.elapsed() < Duration::from_secs(2),
+            None => false,
+        }
+    }
+
+    fn mark(&self) {
+        *self.0.lock().unwrap() = Some(Instant::now());
+    }
+}
+
 pub struct UdpServer {
     socket: UdpSocket,
-    jitter: Arc<Mutex<JitterBuffer>>,
-    decoder: Arc<Mutex<OpusDecoder>>,
+    jitter: Arc<AsyncMutex<JitterBuffer>>,
+    decoder: Arc<AsyncMutex<OpusDecoder>>,
     frame_tx: Sender<Vec<i16>>,
+    activity: StreamActivity,
 }
 
 impl UdpServer {
     pub async fn new(
         bind_addr: &str,
-        jitter: Arc<Mutex<JitterBuffer>>,
+        jitter: Arc<AsyncMutex<JitterBuffer>>,
         decoder: OpusDecoder,
+        activity: StreamActivity,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let socket = UdpSocket::bind(bind_addr).await?;
 
@@ -49,7 +70,7 @@ impl UdpServer {
             })?;
         let frame_tx = rx_out.recv()??;
 
-        Ok(Self { socket, jitter, decoder: Arc::new(Mutex::new(decoder)), frame_tx })
+        Ok(Self { socket, jitter, decoder: Arc::new(AsyncMutex::new(decoder)), frame_tx, activity })
     }
 
     /// Receive-decode-playback loop. Runs until the socket errors fatally.
@@ -61,6 +82,7 @@ impl UdpServer {
                     if len < 4 {
                         continue;
                     }
+                    self.activity.mark();
                     let seq = u16::from_be_bytes([buf[0], buf[1]]);
                     let opus_data = &buf[2..len];
 

@@ -14,6 +14,7 @@ import com.phonebridge.app.media.MediaControllerBridge
 import com.phonebridge.app.network.SignalingClient
 import com.phonebridge.app.pairing.PhoneIdentity
 import com.phonebridge.app.pairing.TrustStore
+import com.phonebridge.app.service.AudioPlaybackService
 import com.phonebridge.app.sms.SmsBridge
 
 /** Phone-side control endpoint for calls + media + SMS. */
@@ -80,6 +81,19 @@ class CallManager(private val context: Context) {
     fun stop() {
         telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_NONE)
         signalingClient.disconnect()
+    }
+
+    /**
+     * Toggle the PC microphone relay: asks the PC to start/stop streaming its
+     * microphone and runs/stops the local playback service (UDP :5003).
+     */
+    fun setPcMicrophone(enabled: Boolean) {
+        if (enabled) {
+            context.startForegroundService(Intent(context, AudioPlaybackService::class.java))
+        } else {
+            context.stopService(Intent(context, AudioPlaybackService::class.java))
+        }
+        signalingClient.sendEvent(if (enabled) "mic_start" else "mic_stop", emptyMap())
     }
 
     fun answerCall() {
