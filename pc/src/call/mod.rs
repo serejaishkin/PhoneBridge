@@ -6,13 +6,12 @@
 //! Answer/Decline buttons, and diagnostics for "why don't I hear anything".
 
 use crate::protocol::HfpSupport;
+#[cfg(target_os = "linux")]
+pub mod hfp_linux;
 #[cfg(windows)]
 pub mod hfp_windows;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-
-#[cfg(windows)]
-pub use hfp_windows as hfp_check;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CallState {
@@ -43,15 +42,21 @@ impl SharedState {
 ///
 /// Platform dispatch:
 /// - Windows: real detection via WinRT (see `hfp_windows.rs`).
-/// - Linux/macOS: not implemented yet — returns Unknown; per AI_HANDOFF_GUI.md
-///   4.1 the UI must show this as "needs manual verification", not as an error.
-///   TODO: BlueZ D-Bus check for the `hfp_hf` profile (Linux), IOBluetooth (macOS).
+/// - Linux: real detection via BlueZ D-Bus (see `hfp_linux.rs`).
+/// - macOS: not implemented yet — returns Unknown; per AI_HANDOFF_GUI.md 4.1
+///   the UI must show this as "needs manual verification", not as an error.
+///   TODO: IOBluetooth check (macOS).
 #[cfg(windows)]
 pub async fn check_hfp_support() -> HfpSupport {
-    hfp_check::detect().await
+    hfp_windows::detect().await
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+pub async fn check_hfp_support() -> HfpSupport {
+    hfp_linux::detect().await
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 pub async fn check_hfp_support() -> HfpSupport {
     log::warn!(
         "check_hfp_support(): platform detection not implemented on this OS yet, \

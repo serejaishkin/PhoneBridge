@@ -36,3 +36,6 @@ path = "src/main.rs"
 [[bin]]
 name = "phonebridge-pairing-demo"
 path = "src/bin/pairing_demo.rs"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = { version = "5.19.0", default-features = false, features = ["tokio"] }
