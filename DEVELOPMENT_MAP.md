@@ -1,239 +1,170 @@
 # PhoneBridge Development Map
 
-Last updated: 2026-08-26
+Last updated: 2026-08-31
 
-## Project direction
-PhoneBridge is a free/open-source project intended for personal use and public sharing.
+## Active branch
+`feature/kdeconnect-core`
 
-The project has pivoted toward a **KDE Connect based architecture** instead of continuing to grow a second custom device/pairing/protocol stack.
+## Current state
+Android compile errors reported by the developer were traced to missing/incorrect references. `MainActivity` already contains the microphone relay state and `AudioPlaybackService` exists; `CallManager` contains its `TelephonyManager`/`Intent` dependencies. The signaling client has been restored as a complete source file and now includes the JSON protocol types used by the active control path, including pairing challenge/result handling and `confirmPairing()`.
 
-## License
-- [x] Project license changed from MIT to GPL-3.0-only.
-- [x] GPL-3.0 license notice added to `LICENSE`.
-- [x] README/Cargo metadata updated for GPL-3.0-only.
-- [ ] Add final third-party attribution/notices after KDE Connect/Sefirah source components are selected.
+**Important:** the developer's local `./gradlew assembleDebug` run reported Kotlin compilation errors before this repair. No new build result is claimed until the developer runs the command again.
 
-## Current repository strategy
+## Immediate verification
 ```text
-PhoneBridge repository
-│
-├── main
-│   └── public project branch
-│
-├── feature/tls-pairing-v1
-│   └── frozen experimental custom transport/session stack
-│
-└── feature/kdeconnect-core
-    └── active migration/integration branch
+cd /d/GitHub/PhoneBridge/android
+./gradlew assembleDebug
 ```
 
-The old custom TLS/pairing implementation is retained for history and reference. Do not continue adding parallel protocol features there unless required to preserve compatibility during migration.
+If compilation advances, fix the next compiler error rather than adding speculative modules.
 
 ## Target architecture
 ```text
-                    PhoneBridge
-                         │
-              KDE Connect protocol/core
-                         │
-        ┌────────────────┼────────────────┐
-        │                │                │
-      Android           PC              Platform
-        │                │                │
-        │          device/features       │
-        │                │         ┌──────┼──────┐
-        │                │         │      │      │
-        │                │       Windows Linux  macOS
-        │                │         │      │      │
-        └────────────────┴─────────┴──────┴──────┘
-                         │
-              PhoneBridge extensions
-                         │
-          ┌──────────────┼──────────────┐
-          │              │              │
-      Bluetooth       PC Hotspot       Audio/HFP
+PhoneBridge
+  │
+  ├── KDE Connect compatible identity/pairing/protocol model
+  │
+  ├── Android
+  │    ├── discovery
+  │    ├── TLS/control session
+  │    ├── pairing/trust
+  │    ├── calls
+  │    ├── media
+  │    └── SMS
+  │
+  ├── PC
+  │    ├── discovery
+  │    ├── TLS/control session
+  │    ├── pairing/trust
+  │    ├── desktop GUI
+  │    └── platform backends
+  │         ├── Windows
+  │         ├── Linux
+  │         └── macOS
+  │
+  └── PhoneBridge extensions
+       ├── Bluetooth
+       ├── PC hotspot
+       └── audio/HFP
 ```
 
-## Reuse policy
-### KDE Connect
-Use as the primary reference/base for:
-- device model;
-- discovery/link abstraction;
-- pairing/trust model;
-- packet/protocol model;
-- plugin/feature architecture;
-- existing Linux/Windows/macOS desktop foundation;
-- Android protocol implementation where appropriate.
+## Pairing
+```text
+Android Hello
+      ↓
+PC TLS/control session
+      ↓
+PairChallenge
+      ↓
+Desktop Allow / Reject
+      ↓
+PairApprove / PairReject
+      ↓
+Android
+      ↓
+TrustStore
+      ↓
+Paired
+```
 
-The current KDE Connect protocol reference documents `kdeconnect.identity` and `kdeconnect.pair`; protocol version 8 is current in that reference. Pairing is explicit and devices must be paired before normal packets are accepted. The PhoneBridge compatibility layer follows this model.
+The protocol must eventually converge on the KDE Connect-compatible path. The old custom TLS/pairing stack is transition/reference code only.
 
-### Sefirah
-Use as a feature/UX reference and, where legally appropriate, as source for selected GPL components.
+## Completed foundation
+- GPL-3.0-only project direction.
+- `feature/kdeconnect-core` migration branch.
+- KDE Connect-compatible identity/pair packet model foundation.
+- PC TLS listener/control substrate.
+- PC certificate fingerprint support.
+- Android persistent identity/certificate support.
+- Android PC certificate pinning/TOFU model.
+- PC trusted-peer storage model.
+- Pairing state machine with explicit Allow/Reject.
+- Desktop pairing UI foundation.
+- Android pairing UI foundation.
+- Android `SignalingClient` mutual-TLS client identity support.
+- Android pairing challenge/result handling.
+- Android `confirmPairing()` command.
+- Android call manager and media/audio service foundation.
+- Windows HFP detection foundation.
+- Linux HFP detection foundation.
+- macOS HFP detection foundation.
+- Windows RFCOMM backend foundation in the transition stack.
 
-### PhoneBridge original code
-Reuse only where it provides functionality not already better supplied by the selected base:
-- Bluetooth transport abstraction/backends;
-- PC hotspot management;
-- cross-platform route selection/reconnect;
-- phone audio streaming;
-- HFP integration;
-- PhoneBridge-specific desktop/mobile UI.
-
-## Migration rules
-1. Do not maintain two independent pairing/protocol stacks long-term.
-2. Prefer KDE Connect's established device/protocol model over recreating equivalent infrastructure.
-3. Keep PhoneBridge-specific functionality behind clean extension/backend boundaries.
-4. Keep OS APIs inside platform-specific modules.
-5. Preserve English comments in code.
-6. Record third-party source origin and license before copying substantial source files.
-7. Do not claim a native backend complete until it actually works with the common protocol/session path.
-8. Refresh file SHA immediately before every GitHub update.
-9. Do not mark tests as passing unless they were actually executed.
-10. Keep the frozen custom stack available until the new implementation reaches feature parity for required workflows.
-
-## Migration phases
-### Phase 0 — licensing and audit
-- [x] Decide on GPL-3.0-only.
-- [x] Change project metadata/license notice.
-- [x] Audit PhoneBridge custom protocol/session architecture.
-- [x] Compare PhoneBridge with KDE Connect and Sefirah at architecture level.
-
-### Phase 1 — KDE Connect integration map
-- [x] Create migration branch `feature/kdeconnect-core`.
-- [x] Add KDE Connect-compatible `identity` and `pair` packet model.
-- [x] Add UI-independent pairing state machine with explicit Allow/Reject decisions.
-- [x] Add interactive desktop pairing playground.
-- [x] Fix duplicate Rust `protocol` module layout.
-- [x] Restore PC audio/network dependencies.
-- [x] Expose the existing pairing module.
-- [x] Remove obsolete `SharedState` dependency from the WebSocket shell.
-- [x] Fix audio input type mismatches.
-- [x] Export `PairingSession` from the KDE Connect module.
-- [x] Add persistent PC TLS certificate/key identity.
-- [x] Add SHA-256 certificate fingerprint display support.
-- [x] Add persistent trusted-peer storage model.
-- [x] Add a TLS pairing listener on port `1716`.
-- [x] Wire TLS listener decisions directly to the production pairing UI.
-- [ ] Pin exact KDE Connect Android/desktop versions or commits.
-- [ ] Map PhoneBridge files to KDE Connect equivalents.
-- [ ] Identify reusable/adaptable/removable source components.
-- [ ] Create final third-party attribution inventory.
-
-### Phase 2 — protocol/device foundation
-- [x] Establish initial KDE Connect-compatible packet model.
-- [x] Establish initial KDE Connect-compatible pairing state model.
-- [x] Establish PC TLS transport substrate.
-- [x] Exchange certificate fingerprints inside Hello/HelloAck on the active control channel (2026-08-26).
-- [x] Route pairing Allow/Reject decisions through the desktop UI backed by TrustStore (2026-08-26).
-- [x] Pin PC certificate fingerprints on Android per host (TOFU) with HelloAck cross-check (2026-08-26).
-- [x] Real Windows HFP support detection via WinRT RFCOMM service cache (2026-08-26).
-- [x] Linux HFP support detection via BlueZ D-Bus/zbus; module compile-verified against zbus 5.19, runtime test on a real Linux box still pending (2026-08-26).
-- [x] macOS HFP support detection via IOBluetooth; module compile-verified under aarch64-apple-darwin, runtime test on a real Mac still pending (2026-08-26).
-- [x] Restore system tray for Windows/macOS via tray-icon inside the eframe creator closure; Linux tray deferred due to GTK/winit main-thread conflict — eframe window is the Linux UI for now (2026-08-26).
-- [ ] Replace old PhoneBridge Hello/HelloAck pairing protocol with KDE Connect-compatible path.
-- [x] Add mutual TLS client-certificate authentication on the PC side: client certs are required during the handshake, the fingerprint is taken from the negotiated TLS session and cross-checked against Hello; covered by integration tests including a certless-client rejection case (2026-08-26). Android now presents its certificate via an X509KeyManager, but the Kotlin changes are still not build-verified.
-- [ ] Add Android packet/session implementation.
-- [ ] Establish real Android ↔ desktop pairing end-to-end on real hardware.
+## Current P0
+- [ ] Re-run Android `assembleDebug` after signaling/client repair.
+- [ ] Fix remaining Kotlin compiler errors one by one.
+- [ ] Build-verify Android X509KeyManager/certificate identity path.
+- [ ] Build-verify Android pairing/session implementation.
+- [ ] Connect Android packet/session implementation to KDE Connect-compatible packet framing.
+- [ ] Establish real Android ↔ PC pairing on hardware.
 - [ ] Establish discovery.
 - [ ] Establish reconnect.
-- [ ] Enable mutual peer certificate authentication after Android certificate support exists.
+- [ ] Establish common transport selection for LAN/hotspot/Bluetooth.
+- [ ] Windows Bluetooth runtime test.
+- [ ] Linux Bluetooth runtime test.
+- [ ] macOS Bluetooth runtime test.
 
-### Phase 3 — desktop platforms
-- [ ] Windows desktop integration.
-- [ ] Linux desktop integration.
-- [ ] macOS desktop integration.
-- [ ] Unified PhoneBridge desktop UI.
+## Audio / calls
+- [x] PC audio receiver source foundation.
+- [x] Android media capture source foundation.
+- [x] PC microphone → Android playback source foundation.
+- [ ] End-to-end audio test.
+- [ ] HFP call control end-to-end.
+- [ ] Opus packet-loss/recovery.
 
-### Phase 4 — Bluetooth
-- [ ] Android Bluetooth Classic transport.
-- [ ] Windows Bluetooth transport.
-- [ ] Linux BlueZ transport.
-- [ ] macOS Bluetooth transport.
-- [ ] Bluetooth reconnect/fallback policy.
+## Desktop GUI
+- [x] Cross-platform dashboard state.
+- [x] Pairing screen.
+- [x] Allow / Reject controls.
+- [x] Forget-peer control foundation.
+- [ ] Bind GUI commands to the actual live production session writer on `feature/kdeconnect-core`.
+- [ ] Live pairing status updates from production session.
+- [ ] Device list/discovery UI.
+- [ ] Reconnect/fallback UI.
 
-Bluetooth is treated as a transport/backend problem, not as a replacement protocol.
+## Android GUI
+- [x] Main PhoneBridge screen.
+- [x] PC address connection control.
+- [x] Media capture control.
+- [x] PC microphone relay control.
+- [x] Pairing protocol hooks.
+- [ ] Discovered PC list.
+- [ ] Pairing code dialog.
+- [ ] Trust/Forget PC UI.
+- [ ] Connection/reconnect state UI.
 
-### Phase 5 — PC hotspot
-- [ ] Windows Mobile Hotspot backend.
-- [ ] Linux NetworkManager hotspot backend.
-- [ ] macOS Internet Sharing backend where supported.
-- [ ] Android hotspot discovery/connection workflow.
-- [ ] Route preference and fallback between LAN, hotspot and Bluetooth.
-
-### Phase 6 — PhoneBridge-specific features
-- [x] Media audio receiver on PC: UDP :5001 -> Opus decode -> jitter buffer -> cpal output, owned by a dedicated audio thread (cpal Stream is !Send); verified live that the listener starts (2026-08-26).
-- [x] Android media capture path wired: MainActivity MediaProjection consent flow -> AudioCaptureService (host passed via intent) -> Opus/UDP to PC :5001; service declared in manifest with mediaProjection type. Not compiled/run — no SDK (2026-08-26).
-- [ ] End-to-end audio test on two real devices.
-- [ ] Phone call control.
-- [ ] HFP state/control.
-- [ ] Android → PC audio streaming runtime polish: packet-loss stats, mute toggle wiring.
-- [x] PC → Android microphone/audio path: MicStart/MicStop control messages, dedicated capture/relay thread on the PC, AudioPlaybackService (:5003) started from the phone UI with a toggle (2026-08-26). Runtime test on real devices pending.
-- [ ] Opus transport and recovery.
-- [ ] Media integration.
-- [ ] Notifications.
-- [ ] Clipboard.
-- [ ] Files.
-
-## Current pairing playground
-Run from `pc/`:
+## Bluetooth
+Bluetooth is a transport/backend, not a replacement protocol.
 
 ```text
-cargo run --bin phonebridge-pairing-demo
+Android Bluetooth
+       │
+       ├── Windows
+       ├── Linux
+       └── macOS
+              ↓
+       common byte stream
+              ↓
+       KDE Connect compatible control/session
 ```
 
-The playground provides:
-- simulated Android identity packet;
-- visible pairing state;
-- remote device details;
-- Allow/Reject state-machine controls;
-- KDE Connect pair response display.
+## Hotspot
+- [ ] Windows Mobile Hotspot.
+- [ ] Linux NetworkManager hotspot.
+- [ ] macOS Internet Sharing where supported.
+- [ ] Android hotspot discovery/connection.
+- [ ] Route preference/fallback.
 
-The new TLS layer provides:
-- persistent PC certificate/key;
-- stable SHA-256 certificate fingerprint;
-- TLS listener on TCP `1716`;
-- KDE Connect identity packet sent after TLS connection;
-- framed packet reception;
-- persistent trust-store data model.
-
-**Current limitation:** the TLS listener uses server-authenticated TLS only. Android peer certificate authentication and GUI-controlled network Allow/Reject response are the next security/pairing integration step. Do not call this production-secure pairing yet.
-
-## Build/test status
-### Latest Windows verification (2026-08-26, cargo 1.97.1)
-From `pc/` on `feature/kdeconnect-core`:
-```text
-cargo check   # passes (warnings only, no errors)
-cargo test    # 16 tests pass across lib + both bins, including new protocol fingerprint tests
-```
-
-The 2026-08-26 pairing block (fingerprint exchange, desktop Allow/Reject gate, Android pinning) is **build-verified on the PC side only**. The Kotlin changes (`PhoneIdentity.kt`, `TrustStore.kt`, `SignalingClient.kt`, `CallManager.kt`) are code-reviewed but **not build-verified** — no Android SDK was available on the machine where they were written.
-
-Next verification:
-```text
-cd /d/GitHub/PhoneBridge/android
-gradlew :app:assembleDebug          # requires Android SDK
-cd /d/GitHub/PhoneBridge/pc
-cargo run --bin phonebridge-pairing-demo
-```
-
-End-to-end pairing on two real devices is still untested and remains the gating milestone for Phase 2.
-
-## Frozen custom stack
-The previous implementation contains Identity, TrustStore, custom TLS server/client, custom pairing state, custom discovery, ConnectionManager, route persistence, Windows RFCOMM transport bridge, and desktop pairing GUI.
-
-These components are **reference/transition code**, not the long-term architecture.
-
-## Testing gate
-Before deleting or replacing old components:
-1. Android build must pass.
-2. Desktop build must pass on the affected platform.
-3. Protocol/pairing tests must pass.
-4. Discovery must work.
-5. Reconnect must work.
-6. Bluetooth transport must be tested on real hardware.
-7. PC hotspot must be tested on the target OS.
-8. No feature is marked complete from static inspection alone.
+## Development rules
+1. Active work is on `feature/kdeconnect-core`.
+2. Do not continue growing the frozen custom protocol unless migration compatibility requires it.
+3. Rust and Kotlin protocol changes must stay aligned.
+4. Keep OS APIs in platform-specific modules.
+5. Code comments are in English.
+6. Refresh the current file SHA immediately before every GitHub update.
+7. Never claim a build/test passed unless it was actually executed.
+8. Do not mark runtime transport complete from static inspection.
+9. Prefer fixing the next real compiler error over speculative architecture changes.
 
 ## Handoff
-Read this file first before continuing development.
-
-**Immediate next task:** build the Android side (SDK required) and run a first end-to-end pairing on two devices: PC shows the Allow/Reject dialog with short codes, phone pins the PC certificate, calls/media/SMS flow over the trusted session. After that add mutual TLS client-certificate authentication so fingerprints are verified inside the handshake itself instead of at the protocol layer.
+The developer has now supplied a real Android Gradle compiler log. The signaling client was restored first. **Next action is a fresh `./gradlew assembleDebug` result from the developer; use the exact next compiler error to continue.**
