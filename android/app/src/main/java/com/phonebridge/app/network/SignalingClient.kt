@@ -23,17 +23,7 @@ import javax.net.ssl.X509ExtendedKeyManager
 import javax.net.ssl.X509TrustManager
 import org.json.JSONObject
 
-/**
- * TLS + newline-delimited JSON control client matching pc/src/protocol.rs.
- *
- * Security model (mutual TLS):
- * - The phone presents its persistent certificate during the handshake itself;
- *   Hello additionally carries the fingerprint so the PC can cross-check that
- *   the claimed device id belongs to the authenticated certificate.
- * - The server certificate is pinned per host on first connect (TOFU); later
- *   connections require an exact match. The HelloAck fingerprint is cross-checked
- *   against the pinned value to defend against a different machine reusing the IP.
- */
+/** TLS control client. Comments intentionally remain in English for cross-platform maintenance. */
 class SignalingClient(
     private val onCommand: (String, Map<String, String>) -> Unit = { _, _ -> },
     private val onStatus: (String, String?) -> Unit = { _, _ -> },
@@ -46,22 +36,18 @@ class SignalingClient(
     @Volatile private var currentHost: String? = null
     @Volatile private var firstConnection = false
 
-    /** Presents the persistent device certificate during mutual TLS. */
     private class IdentityKeyManager(private val identity: PhoneIdentity) : X509ExtendedKeyManager() {
         companion object { const val ALIAS = "phonebridge-identity" }
         override fun getClientAliases(keyType: String?, issuers: Array<out Principal>?) = if (keyType == "RSA") arrayOf(ALIAS) else emptyArray<String>()
         override fun chooseClientAlias(keyType: Array<out String>?, issuers: Array<out Principal>?, socket: Socket?): String? = if (keyType?.contains("RSA") == true) ALIAS else null
         override fun getCertificateChain(alias: String?): Array<X509Certificate>? = if (alias == ALIAS) identity.certificateChain() else null
         override fun getPrivateKey(alias: String?): PrivateKey? = if (alias == ALIAS) identity.privateKey() else null
-        override fun getServerAliases(keyType: String?, issuers: Array<out Principal>?): Array<String>? = null
-        override fun chooseServerAlias(keyType: String?, issuers: Array<out Principal>?, socket: Socket?): String? = null
+        override fun getServerAliases(keyType: String?, issuers: Array<out Principal>?) = null
+        override fun chooseServerAlias(keyType: String?, issuers: Array<out Principal>?, socket: Socket?) = null
     }
 
     fun connect(url: String) { Thread { runCatching { open(url, 5_000) } }.start() }
-
-    fun connectBlocking(url: String, timeoutMs: Long = 5_000): Boolean = try {
-        open(url, timeoutMs); connected
-    } catch (_: Exception) { disconnect(); false }
+    fun connectBlocking(url: String, timeoutMs: Long = 5_000): Boolean = try { open(url, timeoutMs); connected } catch (_: Exception) { disconnect(); false }
 
     private fun open(url: String, timeoutMs: Long) {
         disconnect()
@@ -93,25 +79,18 @@ class SignalingClient(
         val raw = Socket().apply { connect(InetSocketAddress(host, port), timeoutMs.toInt()) }
         val ssl = context.socketFactory.createSocket(raw, host, port, true) as SSLSocket
         ssl.startHandshake()
-        if (firstConnection && trustStore != null && recordedPin != null) {
-            trustStore.pin("host:$host", recordedPin!!)
-            onStatus("first_connection", host)
-        }
+        if (firstConnection && trustStore != null && recordedPin != null) { trustStore.pin("host:$host", recordedPin!!); onStatus("first_connection", host) }
         socket = ssl
         writer = BufferedWriter(OutputStreamWriter(ssl.outputStream, Charsets.UTF_8))
         connected = true
         sendJson(hello())
-
         Thread {
             try {
                 BufferedReader(InputStreamReader(ssl.inputStream, Charsets.UTF_8)).use { reader ->
-                    while (connected) {
-                        val line = reader.readLine() ?: break
-                        handleLine(line)
-                    }
+                    while (connected) { val line = reader.readLine() ?: break; handleLine(line) }
                 }
             } catch (_: Exception) {
-                // Normal when the socket is closed.
+                // Socket closure is handled by the connection state.
             } finally { connected = false }
         }.apply { name = "PhoneBridge-ControlReader"; isDaemon = true; start() }
     }
@@ -131,20 +110,24 @@ class SignalingClient(
                     val trustStore = trustProvider()
                     if (pcFingerprint.isNotEmpty() && host != null && trustStore != null) {
                         val pinned = trustStore.pinFor("host:$host")
-                        if (pinned != null && !pcFingerprint.equals(pinned, ignoreCase = true)) {
-                            onStatus("certificate_mismatch", host); disconnect(); return
-                        }
+                        if (pinned != null && !pcFingerprint.equals(pinned, ignoreCase = true)) { onStatus("certificate_mismatch", host); disconnect(); return }
                         if (pcDeviceId.isNotEmpty()) trustStore.pin("device:$pcDeviceId", pcFingerprint)
                     }
-                    if (!trusted) { onStatus("pairing_rejected", host); disconnect(); return }
-                    onStatus(if (firstConnection) "connected_unverified" else "connected", null)
+                    if (!trusted) { onStatus("pairing_required", host); return }
+                    onStatus("connected", null)
                     sendEvent("media_state", MediaControllerBridge.snapshot())
+                }
+                "PairChallenge" -> {
+                    val code = data?.optString("short_code").orEmpty()
+                    val deviceId = data?.optString("device_id").orEmpty()
+                    onStatus("pairing_challenge", "$deviceId:$code")
+                }
+                "PairResult" -> {
+                    val ok = data?.optBoolean("trusted") ?: false
+                    onStatus(if (ok) "paired" else "pairing_rejected", currentHost)
                 }
                 "Ping" -> sendJson(JSONObject().put("type", "Pong"))
-                "MediaCommand" -> {
-                    onCommand("media_command", mapOf("command" to data?.optString("command").orEmpty()))
-                    sendEvent("media_state", MediaControllerBridge.snapshot())
-                }
+                "MediaCommand" -> { onCommand("media_command", mapOf("command" to data?.optString("command").orEmpty())); sendEvent("media_state", MediaControllerBridge.snapshot()) }
                 "CallAnswer" -> onCommand("call_answer", emptyMap())
                 "CallDecline" -> onCommand("call_decline", emptyMap())
                 "sms_send" -> onCommand("sms_send", mapOf("address" to data?.optString("address").orEmpty(), "body" to data?.optString("body").orEmpty()))
@@ -155,15 +138,15 @@ class SignalingClient(
         }
     }
 
+    fun confirmPairing(deviceId: String, shortCode: String) = sendJson(JSONObject().put("type", "PairConfirm").put("data", JSONObject().put("device_id", deviceId).put("short_code", shortCode)))
+
     fun sendEvent(type: String, data: Map<String, String>) {
         val message = when (type) {
             "incoming_call" -> JSONObject().put("type", "IncomingCall").put("data", JSONObject().apply { put("caller_number", data["number"]); put("caller_name", data["name"]) })
             "call_ended" -> JSONObject().put("type", "CallEnded")
             "mic_start" -> JSONObject().put("type", "MicStart")
             "mic_stop" -> JSONObject().put("type", "MicStop")
-            "media_state" -> JSONObject().put("type", "MediaState").put("data", JSONObject().apply {
-                put("package", data["package"]); put("state", data["state"].orEmpty().replaceFirstChar { it.uppercase() }); put("title", data["title"]); put("artist", data["artist"]); put("album", data["album"])
-            })
+            "media_state" -> JSONObject().put("type", "MediaState").put("data", JSONObject().apply { put("package", data["package"]); put("state", data["state"].orEmpty().replaceFirstChar { it.uppercase() }); put("title", data["title"]); put("artist", data["artist"]); put("album", data["album"]) })
             "sms_received" -> JSONObject().put("type", "sms_received").put("data", JSONObject().apply { put("address", data["address"].orEmpty()); put("body", data["body"].orEmpty()); put("timestamp", data["timestamp"]?.toLongOrNull() ?: 0L) })
             "sms_item" -> JSONObject().put("type", "sms_item").put("data", JSONObject().apply { put("id", data["id"].orEmpty()); put("address", data["address"].orEmpty()); put("body", data["body"].orEmpty()); put("timestamp", data["timestamp"]?.toLongOrNull() ?: 0L) })
             "sms_list_end" -> JSONObject().put("type", "sms_list_end").put("data", JSONObject().put("count", data["count"]?.toIntOrNull() ?: 0))
@@ -177,31 +160,15 @@ class SignalingClient(
     private fun hello(): JSONObject {
         val identity = identityProvider()
         return JSONObject().put("type", "Hello").put("data", JSONObject().apply {
-            if (identity != null) {
-                put("device_id", identity.deviceId)
-                put("cert_fingerprint", identity.fingerprintHex())
-            } else {
-                put("device_id", UUID.nameUUIDFromBytes((Build.BRAND + ":" + Build.DEVICE).toByteArray()).toString())
-            }
+            if (identity != null) { put("device_id", identity.deviceId); put("cert_fingerprint", identity.fingerprintHex()) }
+            else put("device_id", UUID.nameUUIDFromBytes((Build.BRAND + ":" + Build.DEVICE).toByteArray()).toString())
             put("device_name", Build.MODEL); put("platform", "android"); put("protocol_version", 1)
         })
     }
 
     private fun sha256Hex(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
-
-    private fun sendJson(json: JSONObject) {
-        synchronized(this) {
-            if (!connected) return
-            runCatching { writer?.apply { write(json.toString()); newLine(); flush() } }.onFailure { connected = false }
-        }
-    }
-
-    fun disconnect() {
-        connected = false
-        runCatching { writer?.close() }; runCatching { socket?.close() }
-        writer = null; socket = null
-    }
-
+    private fun sendJson(json: JSONObject) { synchronized(this) { if (!connected) return; runCatching { writer?.apply { write(json.toString()); newLine(); flush() } }.onFailure { connected = false } } }
+    fun disconnect() { connected = false; runCatching { writer?.close() }; runCatching { socket?.close() }; writer = null; socket = null }
     fun isConnected() = connected
 
     private fun parseTarget(url: String): Pair<String, Int> {
