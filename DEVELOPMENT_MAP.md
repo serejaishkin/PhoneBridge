@@ -167,6 +167,7 @@ Bluetooth is treated as a transport/backend problem, not as a replacement protoc
 - [ ] HFP state/control.
 - [ ] Android → PC audio streaming runtime polish: packet-loss stats, mute toggle wiring.
 - [x] PC → Android microphone/audio path: MicStart/MicStop control messages, dedicated capture/relay thread on the PC, AudioPlaybackService (:5003) started from the phone UI with a toggle (2026-08-26). Runtime test on real devices pending.
+- [x] Call control lifecycle: CallAnswer/CallDecline/CallEnd/CallActive protocol messages, Answer/Reject/HangUp buttons in desktop GUI + tray, Android handles all via TelecomManager (2026-08-26). Runtime test pending.
 - [x] Call control: CallAnswer/CallDecline/CallEnd/CallActive protocol messages, Answer/Reject/HangUp buttons in desktop GUI + tray, Android handles all via TelecomManager (2026-08-26). Runtime test pending.
 - [ ] Opus transport and recovery.
 - [ ] Media integration.
