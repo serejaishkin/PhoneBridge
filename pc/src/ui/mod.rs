@@ -25,6 +25,8 @@ pub struct PairingRequest {
 pub trait UiBackend: Send + Sync {
     async fn notify_incoming_call(&self, caller_name: Option<&str>, caller_number: Option<&str>);
     async fn notify_call_ended(&self);
+    /// Active call established (after answer).
+    async fn notify_call_active(&self);
     async fn update_connection_status(&self, connected: bool, peer_name: Option<&str>);
     async fn update_hfp_status(&self, status: HfpSupport);
     async fn update_media_state(
@@ -50,6 +52,7 @@ pub struct HeadlessUi;
 impl UiBackend for HeadlessUi {
     async fn notify_incoming_call(&self, caller_name: Option<&str>, caller_number: Option<&str>) { log::info!("[UI] incoming call: {} ({})", caller_name.unwrap_or("unknown"), caller_number.unwrap_or("no number")); }
     async fn notify_call_ended(&self) { log::info!("[UI] call ended"); }
+    async fn notify_call_active(&self) { log::info!("[UI] call active"); }
     async fn update_connection_status(&self, connected: bool, peer_name: Option<&str>) { log::info!("[UI] connection status: {} ({})", if connected { "connected" } else { "disconnected" }, peer_name.unwrap_or("-")); }
     async fn update_hfp_status(&self, status: HfpSupport) { log::info!("[UI] HFP support: {:?}", status); }
     async fn update_media_state(&self, package: Option<&str>, state: MediaPlaybackState, title: Option<&str>, artist: Option<&str>, album: Option<&str>) { log::info!("[UI] media: package={:?} state={:?} title={:?} artist={:?} album={:?}", package, state, title, artist, album); }

@@ -16,6 +16,8 @@ pub struct DesktopState {
     pub caller_name: String,
     pub caller_number: String,
     pub ringing: bool,
+    /// Active call in progress (after answer, before hang-up).
+    pub call_active: bool,
     pub media_package: String,
     pub media_state: MediaPlaybackState,
     pub media_title: String,
@@ -43,6 +45,7 @@ impl Default for DesktopState {
             caller_name: String::new(),
             caller_number: String::new(),
             ringing: false,
+            call_active: false,
             media_package: String::new(),
             media_state: MediaPlaybackState::None,
             media_title: String::new(),
@@ -70,7 +73,19 @@ impl UiBackend for DesktopUi {
         s.caller_number = number.unwrap_or("").to_string();
     }
 
-    async fn notify_call_ended(&self) { self.state.lock().unwrap().ringing = false; }
+    async fn notify_call_ended(&self) {
+        let mut s = self.state.lock().unwrap();
+        s.ringing = false;
+        s.call_active = false;
+        s.caller_name.clear();
+        s.caller_number.clear();
+    }
+
+    async fn notify_call_active(&self) {
+        let mut s = self.state.lock().unwrap();
+        s.ringing = false;
+        s.call_active = true;
+    }
 
     async fn update_connection_status(&self, connected: bool, peer_name: Option<&str>) {
         let mut s = self.state.lock().unwrap();
@@ -78,6 +93,9 @@ impl UiBackend for DesktopUi {
         s.peer_name = peer_name.unwrap_or("").to_string();
         if !connected {
             s.ringing = false;
+            s.call_active = false;
+            s.caller_name.clear();
+            s.caller_number.clear();
             s.media_state = MediaPlaybackState::None;
             s.media_title.clear();
             s.media_artist.clear();
@@ -194,7 +212,7 @@ impl eframe::App for PhoneBridgeApp {
             for command in tray.poll_commands() {
                 match command {
                     TrayCommand::AnswerCall => self.send(Message::CallAnswer),
-                    TrayCommand::EndCall => self.send(Message::CallDecline),
+                    TrayCommand::EndCall => self.send(Message::CallEnd),
                     // No audio pipeline is wired yet; keep the item responsive.
                     TrayCommand::ToggleMute => log::info!("tray: mute toggle requested (no audio path yet)"),
                     TrayCommand::OpenSettings => log::info!("tray: settings requested (not implemented yet)"),
@@ -203,9 +221,9 @@ impl eframe::App for PhoneBridgeApp {
             }
         }
 
-        let (connected, peer_name, hfp, caller_name, caller_number, ringing, media_state, media_title, media_artist, media_album, sms_notice, sms_error, local_code, streaming, mic_active) = {
+        let (connected, peer_name, hfp, caller_name, caller_number, ringing, call_active, media_state, media_title, media_artist, media_album, sms_notice, sms_error, local_code, streaming, mic_active) = {
             let state = self.state.lock().unwrap();
-            (state.connected, state.peer_name.clone(), state.hfp, state.caller_name.clone(), state.caller_number.clone(), state.ringing, state.media_state, state.media_title.clone(), state.media_artist.clone(), state.media_album.clone(), state.sms_notice.clone(), state.sms_error.clone(), state.local_code.clone(), state.streaming, state.mic_active)
+            (state.connected, state.peer_name.clone(), state.hfp, state.caller_name.clone(), state.caller_number.clone(), state.ringing, state.call_active, state.media_state, state.media_title.clone(), state.media_artist.clone(), state.media_album.clone(), state.sms_notice.clone(), state.sms_error.clone(), state.local_code.clone(), state.streaming, state.mic_active)
         };
 
         egui::TopBottomPanel::top("top").show(ctx, |ui| {
@@ -232,6 +250,11 @@ impl eframe::App for PhoneBridgeApp {
                     if ui.button("Ответить").clicked() { self.send(Message::CallAnswer); }
                     if ui.button("Отклонить").clicked() { self.send(Message::CallDecline); }
                 });
+            } else if call_active {
+                ui.strong("Активный звонок");
+                if !caller_name.is_empty() { ui.label(&caller_name); }
+                if !caller_number.is_empty() { ui.label(&caller_number); }
+                if ui.button("Завершить").clicked() { self.send(Message::CallEnd); }
             } else {
                 ui.label("Нет активного звонка");
             }
@@ -263,11 +286,15 @@ impl eframe::App for PhoneBridgeApp {
             let messages = self.runtime.block_on(async { self.sms_store.lock().await.all() });
             egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
                 for (i, sms) in messages.iter().enumerate() {
-                    let label = format!("{}  —  {}", sms.address, sms.body.replace('\n', " "));
+                    let ts = format_sms_timestamp(sms.timestamp);
+                    let label = format!("{ts}  {}  —  {}", sms.address, sms.body.replace('\n', " "));
                     if ui.selectable_label(self.selected_sms == Some(i), label).clicked() {
                         self.selected_sms = Some(i);
                         self.selected_address = sms.address.clone();
                     }
+                }
+                if messages.is_empty() && connected {
+                    ui.label("Нет сообщений. Нажмите «Обновить историю».");
                 }
             });
 
@@ -317,4 +344,46 @@ impl eframe::App for PhoneBridgeApp {
                 });
         }
     }
+}
+
+/// Format an SMS timestamp (unix seconds) into a compact local time string
+/// like "04.09 14:32" if within the current year, or "04.09.25 14:32" if not.
+fn format_sms_timestamp(ts: i64) -> String {
+    use std::time::UNIX_EPOCH;
+    let dur = std::time::Duration::from_secs(ts as u64);
+    let dt = UNIX_EPOCH + dur;
+    // SystemTime -> broken-down time via chrono-like manual conversion.
+    // Avoid adding chrono dependency just for formatting; use simple division.
+    let secs = ts;
+    let days = secs / 86400;
+    let time_of_day = secs % 86400;
+    let h = time_of_day / 3600;
+    let m = (time_of_day % 3600) / 60;
+    // Civil date from days since epoch (1970-01-01 is Thursday = day 4).
+    let civil = days_to_civil(days);
+    if civil.0 == current_year() {
+        format!("{:02}.{:02} {:02}:{:02}", civil.1, civil.2, h, m)
+    } else {
+        format!("{:02}.{:02}.{:02} {:02}:{:02}", civil.1, civil.2, civil.0 % 100, h, m)
+    }
+}
+
+fn days_to_civil(days: i64) -> (i64, u32, u32) {
+    let z = days + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m as u32, d as u32)
+}
+
+fn current_year() -> i64 {
+    // Approximate current year from system time; avoids pulling in chrono.
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    1970 + (now.as_secs() / 31557600) as i64
 }

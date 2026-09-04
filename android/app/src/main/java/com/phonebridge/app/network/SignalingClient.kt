@@ -144,6 +144,7 @@ class SignalingClient(
         val message = when (type) {
             "incoming_call" -> JSONObject().put("type", "IncomingCall").put("data", JSONObject().apply { put("caller_number", data["number"]); put("caller_name", data["name"]) })
             "call_ended" -> JSONObject().put("type", "CallEnded")
+            "call_active" -> JSONObject().put("type", "CallActive")
             "mic_start" -> JSONObject().put("type", "MicStart")
             "mic_stop" -> JSONObject().put("type", "MicStop")
             "media_state" -> JSONObject().put("type", "MediaState").put("data", JSONObject().apply { put("package", data["package"]); put("state", data["state"].orEmpty().replaceFirstChar { it.uppercase() }); put("title", data["title"]); put("artist", data["artist"]); put("album", data["album"]) })

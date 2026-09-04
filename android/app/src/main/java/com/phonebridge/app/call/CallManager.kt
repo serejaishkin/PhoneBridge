@@ -32,6 +32,7 @@ class CallManager(private val context: Context) {
             when (type) {
                 "call_answer" -> answerCall()
                 "call_decline" -> endCall()
+                "call_end" -> endCall()
                 "media_command" -> {
                     val command = when (data["command"]) {
                         "Play" -> "media_play"; "Pause" -> "media_pause"; "PlayPause" -> "media_play_pause"
@@ -56,6 +57,7 @@ class CallManager(private val context: Context) {
         override fun onCallStateChanged(state: Int, phoneNumber: String?) {
             when (state) {
                 TelephonyManager.CALL_STATE_RINGING -> signalingClient.sendEvent("incoming_call", mapOf("number" to (phoneNumber ?: "Unknown")))
+                TelephonyManager.CALL_STATE_OFFHOOK -> signalingClient.sendEvent("call_active", emptyMap())
                 TelephonyManager.CALL_STATE_IDLE -> signalingClient.sendEvent("call_ended", emptyMap())
             }
         }

@@ -39,6 +39,13 @@ pub enum Message {
     CallEnded,
     CallAnswer,
     CallDecline,
+    /// PC -> Android: hang up an active call (distinct from CallDecline which
+    /// rejects an incoming ringing call).
+    #[serde(rename = "call_end")]
+    CallEnd,
+    /// Android -> PC: call was accepted and is now active.
+    #[serde(rename = "call_active")]
+    CallActive,
     /// PC -> Android: control command for the active MediaSession.
     MediaCommand { command: MediaCommand },
     /// Android -> PC: state of the active MediaSession.

@@ -231,6 +231,7 @@ async fn handle_connection(stream: tokio::net::TcpStream, peer_addr: std::net::S
                 ui.notify_incoming_call(caller_name.as_deref(), caller_number.as_deref()).await;
             }
             Message::CallEnded => { log::info!("call ended"); ui.notify_call_ended().await; }
+            Message::CallActive => { log::info!("call active (answered by phone)"); ui.notify_call_active().await; }
             Message::SmsReceived { address, body, timestamp } => {
                 log::info!("SMS received from {address}: {body}");
                 sms_store.lock().await.add_received(address.clone(), body.clone(), timestamp);
